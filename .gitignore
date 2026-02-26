@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data (large files — never commit raw data)
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.fasta
+*.fa
+*.sra
+genome_cache/
+profiles/
+humann3_out/
+picrust2_out/
+annotations/
+models/
+
+# Reference data (curated, not checked in)
+reference/*.biom
+reference/*.csv
+
+# Databases
+*.db
+*.db-journal
+
+# Receipts (generated at runtime)
+receipts/*.json
+
+# Results (generated at runtime)
+results/
+!results/.gitkeep
+
+# IDE / OS
+.DS_Store
+.vscode/
+*.swp
+.idea/
+
+# Secrets / credentials
+.env
+*.key

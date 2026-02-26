@@ -1,0 +1,55 @@
+# soil-microbiome-pipeline-core requirements
+# Pin versions once the stack is stable; keep loose for now.
+
+# Core pipeline
+pydantic>=2.0
+typer>=0.9
+rich>=13.0
+pyyaml>=6.0
+
+# Bioinformatics / microbiome
+scikit-bio>=0.6
+biom-format>=2.1
+biopython>=1.81
+
+# ML
+scikit-learn>=1.3
+numpy>=1.25
+scipy>=1.11
+pandas>=2.0
+
+# Metabolic modeling
+cobra>=0.29           # COBRApy — community FBA + dFBA
+carveme>=1.5          # automated genome-scale model construction
+
+# Geospatial
+geopandas>=0.14
+shapely>=2.0
+
+# Phylogenetics
+ete3>=3.1
+
+# Visualization / reporting
+matplotlib>=3.8
+contextily>=1.4       # basemap tiles for spatial plots
+
+# Stats
+statsmodels>=0.14     # FDR correction
+
+# Utilities
+joblib>=1.3           # model persistence
+requests>=2.31        # API adapters
+tqdm>=4.66
+
+# Non-Python dependencies (install via conda / system package manager):
+#   qiime2          — 16S amplicon pipeline
+#   kraken2         — shotgun taxonomic classification
+#   bracken         — abundance re-estimation from Kraken2 output
+#   humann3         — shotgun functional profiling
+#   picrust2        — 16S functional prediction
+#   mmseqs2         — fast sequence alignment (functional gene scanning)
+#   prokka          — genome annotation
+#   diamond         — protein alignment (CarveMe dependency)
+#   antismash       — biosynthetic gene cluster detection (pathogen suppression app)
+#   megahit         — de novo metagenomic assembly (optional MAG path)
+#   metabat2        — metagenomic binning (optional MAG path)
