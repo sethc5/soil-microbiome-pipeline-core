@@ -460,3 +460,84 @@ class TestPipelineCore:
         tax = result.get("taxonomy", {})
         # precomputed profile should flow through
         assert tax.get("n_taxa", 0) == 120
+
+
+# ===========================================================================
+# pipeline_core -- DB integration (exercises _persist_t0_result)
+# ===========================================================================
+
+class TestPipelineCoreDB:
+    """Exercises the DB persistence path that was broken by schema mismatches."""
+
+    def _make_sample(self):
+        return {
+            "sample_id":           "db_test_001",
+            "ph":                  6.8,
+            "lat":                 40.0,
+            "lon":                 -105.0,
+            "depth_cm":            10.0,
+            "land_use":            "agriculture",
+            "sequencing_type":     "16S",
+            "precomputed_profile": {
+                "phylum_profile": {"Proteobacteria": 0.5, "Actinobacteria": 0.3, "Ascomycota": 0.2},
+                "top_genera": [{"name": "Nitrosomonas", "rel_abundance": 0.05}],
+                "n_taxa": 80,
+            },
+            "community_data": {"nifH nitrogenase": 0.03},
+        }
+
+    def test_persist_does_not_raise(self):
+        """_persist_t0_result must complete without OperationalError."""
+        from pipeline_core import _process_one_sample_t0, _persist_t0_result
+        from config_schema import T0Filters
+        from db_utils import SoilDB
+
+        sample = self._make_sample()
+        result = _process_one_sample_t0(sample, T0Filters().model_dump())
+
+        with SoilDB(":memory:") as db:
+            _persist_t0_result(result, db, "batch_audit_test")
+
+    def test_sample_written_to_db(self):
+        """After persist, sample row is readable with correct column values."""
+        from pipeline_core import _process_one_sample_t0, _persist_t0_result
+        from config_schema import T0Filters
+        from db_utils import SoilDB
+
+        sample = self._make_sample()
+        result = _process_one_sample_t0(sample, T0Filters().model_dump())
+
+        with SoilDB(":memory:") as db:
+            _persist_t0_result(result, db, "batch_audit_test")
+            row = db.get_sample("db_test_001")
+
+        assert row is not None
+        assert row["sample_id"] == "db_test_001"
+        # Verify correct column mappings (not ph/lat/lon aliases)
+        assert row.get("latitude") is not None or row.get("soil_ph") is not None
+
+    def test_community_written_to_db(self):
+        """After persist, community row is readable."""
+        from pipeline_core import _process_one_sample_t0, _persist_t0_result
+        from config_schema import T0Filters
+        from db_utils import SoilDB
+
+        sample = self._make_sample()
+        result = _process_one_sample_t0(sample, T0Filters().model_dump())
+
+        with SoilDB(":memory:") as db:
+            _persist_t0_result(result, db, "batch_audit_test")
+            comm = db.get_community_for_sample("db_test_001")
+
+        assert comm is not None
+        assert comm["sample_id"] == "db_test_001"
+
+    def test_metadata_key_not_empty(self):
+        """metadata dict must not be empty (normalised vs normalized bug check)."""
+        from pipeline_core import _process_one_sample_t0
+        from config_schema import T0Filters
+
+        result = _process_one_sample_t0(self._make_sample(), T0Filters().model_dump())
+        assert len(result.get("metadata", {})) > 0, (
+            "metadata dict is empty — likely normalised vs normalized key mismatch"
+        )

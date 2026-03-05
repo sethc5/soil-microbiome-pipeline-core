@@ -83,19 +83,15 @@ def run_t0_batch(
         n_processed  int
         n_passed     int
         n_failed     int
-        run_id       int   (DB run record ID)
+        batch_run_label  str   (label tagging per-sample run rows)
         receipt_path str
         errors       list[dict]
     }
     """
     receipt = Receipt(receipts_dir=receipts_dir).start()
-    run_id = db.insert_run({
-        "target_id":     target_id,
-        "tier":          0,
-        "status":        "running",
-        "n_samples_in":  len(samples),
-        "config_yaml":   yaml.dump(config.model_dump()),
-    })
+    # Batch run label — used as target_id tag on per-sample run rows
+    import time as _time
+    batch_run_label = f"{target_id}_{int(_time.time())}"
 
     t0_cfg = config.t0
 
@@ -122,7 +118,7 @@ def run_t0_batch(
                     sid = sample.get("sample_id", "<unknown>")
                     try:
                         result = future.result()
-                        _persist_t0_result(result, db, run_id)
+                        _persist_t0_result(result, db, batch_run_label)
                         if result.get("passed_t0", False):
                             n_passed += 1
                         else:
@@ -141,7 +137,7 @@ def run_t0_batch(
                 sid = sample.get("sample_id", "<unknown>")
                 try:
                     result = _process_one_sample_t0(sample, t0_cfg.model_dump())
-                    _persist_t0_result(result, db, run_id)
+                    _persist_t0_result(result, db, batch_run_label)
                     if result.get("passed_t0", False):
                         n_passed += 1
                     else:
@@ -159,19 +155,13 @@ def run_t0_batch(
     status = "completed" if not errors else "completed_with_errors"
     receipt_path = receipt.finish(status=status)
 
-    db.update_run(run_id, {
-        "status":         status,
-        "n_samples_out":  n_passed,
-        "receipt_path":   str(receipt_path),
-    })
-
     return {
-        "n_processed":  n_passed + n_failed,
-        "n_passed":     n_passed,
-        "n_failed":     n_failed,
-        "run_id":       run_id,
-        "receipt_path": str(receipt_path),
-        "errors":       errors,
+        "n_processed":    n_passed + n_failed,
+        "n_passed":       n_passed,
+        "n_failed":       n_failed,
+        "batch_run_label": batch_run_label,
+        "receipt_path":   str(receipt_path),
+        "errors":         errors,
     }
 
 
@@ -206,7 +196,7 @@ def _process_one_sample_t0(sample: dict, t0_cfg_dict: dict) -> dict:
     # ---- 1. Metadata validation ----
     try:
         meta = validate_sample_metadata(sample, t0_cfg)
-        result["metadata"]       = meta.get("normalised", {})
+        result["metadata"]       = meta.get("normalized", {})
         result["meta_warnings"]  = meta.get("warnings", [])
         result["meta_reject"]    = meta.get("reject_reasons", [])
         result["reject_reasons"] += meta.get("reject_reasons", [])
@@ -311,7 +301,7 @@ def _process_one_sample_t0(sample: dict, t0_cfg_dict: dict) -> dict:
 # DB persistence (main-process only -- uses DB connection)
 # ---------------------------------------------------------------------------
 
-def _persist_t0_result(result: dict, db: SoilDB, run_id: int) -> None:
+def _persist_t0_result(result: dict, db: SoilDB, batch_run_label: str) -> None:
     """Write T0 results from a single sample into the database."""
     sample_id = result["sample_id"]
     meta      = result.get("metadata", {})
@@ -320,46 +310,62 @@ def _persist_t0_result(result: dict, db: SoilDB, run_id: int) -> None:
     flags     = result.get("community_flags", {})
     fn_sum    = result.get("function_summary", {})
 
-    # Upsert sample record
+    # Upsert sample record — column names match db_utils.py samples schema
     db.upsert_sample({
-        "sample_id":         sample_id,
-        "source":            meta.get("source", "unknown"),
-        "site_id":           meta.get("site_id"),
-        "visit_number":      meta.get("visit_number"),
-        "lat":               meta.get("lat"),
-        "lon":               meta.get("lon"),
-        "depth_cm":          meta.get("depth_cm"),
-        "ph":                meta.get("ph"),
-        "sampling_fraction": meta.get("sampling_fraction"),
-        "sequencing_type":   meta.get("sequencing_type", taxonomy.get("seq_type")),
-        "land_use":          meta.get("land_use"),
-        "texture_class":     meta.get("texture_class"),
-        "climate_zone":      meta.get("climate_zone"),
-        "metadata_json":     json.dumps(meta),
+        "sample_id":          sample_id,
+        "source":             meta.get("source", "unknown"),
+        "site_id":            meta.get("site_id"),
+        "visit_number":       meta.get("visit_number"),
+        "latitude":           meta.get("latitude"),
+        "longitude":          meta.get("longitude"),
+        "sampling_depth_cm":  meta.get("depth_cm"),
+        "soil_ph":            meta.get("soil_ph"),
+        "sampling_fraction":  meta.get("sampling_fraction"),
+        "sequencing_type":    meta.get("sequencing_type", taxonomy.get("seq_type")),
+        "land_use":           meta.get("land_use"),
+        "soil_texture":       meta.get("soil_texture") or meta.get("texture_class"),
+        "climate_zone":       meta.get("climate_zone"),
+        "sand_pct":           meta.get("sand_pct"),
+        "silt_pct":           meta.get("silt_pct"),
+        "clay_pct":           meta.get("clay_pct"),
+        "n_taxa":             taxonomy.get("n_taxa", 0),
     })
 
-    # Upsert community record
-    db.upsert_community({
-        "sample_id":             sample_id,
-        "phylum_profile_json":   json.dumps(taxonomy.get("phylum_profile", {})),
-        "top_genera_json":       json.dumps(taxonomy.get("top_genera", [])),
-        "n_taxa":                taxonomy.get("n_taxa", 0),
-        "shannon_diversity":     diversity.get("shannon"),
-        "simpson_diversity":     diversity.get("simpson"),
-        "chao1":                 diversity.get("chao1"),
-        "pielou_evenness":       diversity.get("pielou_evenness"),
+    # Upsert community record — column names match db_utils.py communities schema
+    community_id = db.upsert_community({
+        "sample_id":              sample_id,
+        "phylum_profile":         json.dumps(taxonomy.get("phylum_profile", {})),
+        "top_genera":             json.dumps(taxonomy.get("top_genera", [])),
+        "shannon_diversity":      diversity.get("shannon"),
+        "simpson_diversity":      diversity.get("simpson"),
+        "chao1_richness":         diversity.get("chao1"),
+        "observed_otus":          diversity.get("observed_otus"),
+        "pielou_evenness":        diversity.get("pielou_evenness"),
         "fungal_bacterial_ratio": taxonomy.get("fungal_bacterial_ratio"),
-        "its_profile_json":      json.dumps(taxonomy.get("its_profile", {})),
-        "has_amoa_bacterial":    flags.get("has_amoa_bacterial", False),
-        "has_amoa_archaeal":     flags.get("has_amoa_archaeal", False),
-        "functional_genes_json": flags.get("functional_genes", "{}"),
-        "n_functions_detected":  fn_sum.get("n_functions_detected", 0),
-        "has_n_cycling":         fn_sum.get("has_n_cycling", False),
-        "has_c_cycling":         fn_sum.get("has_c_cycling", False),
-        "has_mycorrhizal":       fn_sum.get("has_mycorrhizal", False),
-        "t0_passed":             result.get("passed_t0", False),
-        "t0_reject_reasons":     json.dumps(result.get("reject_reasons", [])),
-        "run_id":                run_id,
+        "its_profile":            json.dumps(taxonomy.get("its_profile") or {}),
+        "has_nifh":               flags.get("has_nifh", False),
+        "has_dsrab":              flags.get("has_dsrab", False),
+        "has_mcra":               flags.get("has_mcra", False),
+        "has_mmox":               flags.get("has_mmox", False),
+        "has_amoa_bacterial":     flags.get("has_amoa_bacterial", False),
+        "has_amoa_archaeal":      flags.get("has_amoa_archaeal", False),
+        "has_laccase":            flags.get("has_laccase", False),
+        "has_peroxidase":         flags.get("has_peroxidase", False),
+        "nifh_is_hgt_flagged":    flags.get("nifh_is_hgt_flagged", False),
+        "functional_genes":       flags.get("functional_genes", "{}"),
+        "otu_table_path":         taxonomy.get("otu_table_path"),
+    })
+
+    # Per-sample run record — columns match db_utils.py runs schema
+    db.insert_run({
+        "sample_id":              sample_id,
+        "community_id":           community_id,
+        "target_id":              None,   # FK to targets; NULL until target is registered
+        "t0_pass":                result.get("passed_t0", False),
+        "t0_reject_reason":       (result.get("reject_reasons") or [None])[0],
+        "t0_metadata_ok":         len(result.get("meta_reject", [])) == 0,
+        "t0_depth_ok":            result.get("quality_filter", {}).get("passed", True),
+        "t0_functional_genes_ok": bool(flags),
     })
 
 
