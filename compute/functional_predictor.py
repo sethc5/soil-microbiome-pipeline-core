@@ -18,26 +18,227 @@ Usage:
 from __future__ import annotations
 import logging
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Pseudo-count for CLR transform (avoids log(0))
+_CLR_PSEUDOCOUNT = 1e-9
+
+
+def clr_transform(X: np.ndarray) -> np.ndarray:
+    """Centered log-ratio transform for compositional OTU data.
+
+    X: (n_samples, n_features) relative abundances in [0, 1].
+    Returns CLR-transformed matrix of the same shape.
+    """
+    X = np.where(X == 0, _CLR_PSEUDOCOUNT, X)
+    log_X = np.log(X)
+    geometric_mean = log_X.mean(axis=1, keepdims=True)
+    return log_X - geometric_mean
+
 
 class FunctionalPredictor:
+    """ML model for predicting target function scores from community + env features.
+
+    Supported model_type values: 'random_forest', 'gradient_boost'.
+    OTU features should be CLR-transformed before training (see clr_transform()).
+    """
+
+    VALID_MODEL_TYPES = ("random_forest", "gradient_boost")
+
     def __init__(self, model_type: str = "random_forest"):
+        if model_type not in self.VALID_MODEL_TYPES:
+            raise ValueError(
+                f"model_type must be one of {self.VALID_MODEL_TYPES}, got {model_type!r}"
+            )
         self.model_type = model_type
-        self._model = None
+        self._model: Any = None  # scikit-learn estimator
+        self._feature_names: list[str] = []
+        self._apply_clr: bool = True  # whether OTU features need CLR transform
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
+
+    def train(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: list[str] | None = None,
+        apply_clr: bool = True,
+    ) -> "FunctionalPredictor":
+        """Train on feature matrix X (n_samples × n_features) and target y.
+
+        X: Combined OTU + environmental features. OTU columns are CLR-transformed
+           if apply_clr=True (set False if already transformed upstream).
+        y: Continuous functional score (e.g. BNF rate).
+
+        Returns self for chaining.
+        """
+        try:
+            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+            from sklearn.pipeline import Pipeline
+            from sklearn.preprocessing import StandardScaler
+        except ImportError as exc:
+            raise ImportError(
+                "scikit-learn is required for FunctionalPredictor. "
+                "Install via: pip install scikit-learn"
+            ) from exc
+
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+        self._apply_clr = apply_clr
+        self._feature_names = feature_names or [f"feature_{i}" for i in range(X.shape[1])]
+
+        X_processed = clr_transform(X) if apply_clr else X
+
+        if self.model_type == "random_forest":
+            estimator = RandomForestRegressor(
+                n_estimators=200,
+                max_features="sqrt",
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+            )
+        else:  # gradient_boost
+            estimator = GradientBoostingRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                max_depth=4,
+                subsample=0.8,
+                random_state=42,
+            )
+
+        self._model = Pipeline([
+            ("scaler", StandardScaler()),
+            ("est", estimator),
+        ])
+        self._model.fit(X_processed, y)
+        logger.info(
+            "FunctionalPredictor trained: model=%s, n_samples=%d, n_features=%d",
+            self.model_type, X.shape[0], X.shape[1],
+        )
+        return self
+
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
+
+    def predict(
+        self,
+        features: np.ndarray | list,
+    ) -> tuple[float, float]:
+        """Return (predicted_score, uncertainty_estimate) for a single sample.
+
+        uncertainty_estimate is the std-dev of individual tree predictions
+        (for RandomForest) or a proxy uncertainty (0.0) for GradientBoost.
+        """
+        if self._model is None:
+            raise RuntimeError("No model loaded or trained — call train() or load() first.")
+
+        X = np.asarray(features, dtype=float)
+        if X.ndim == 1:
+            X = X[np.newaxis, :]
+
+        X_processed = clr_transform(X) if self._apply_clr else X
+
+        # Scale with the fitted scaler from the pipeline
+        scaler = self._model.named_steps["scaler"]
+        estimator = self._model.named_steps["est"]
+        X_scaled = scaler.transform(X_processed)
+
+        point_estimate = float(estimator.predict(X_scaled)[0])
+
+        # Uncertainty via tree ensemble variance (RF only)
+        uncertainty = 0.0
+        if self.model_type == "random_forest" and hasattr(estimator, "estimators_"):
+            tree_preds = np.array([
+                tree.predict(X_scaled)[0] for tree in estimator.estimators_
+            ])
+            uncertainty = float(tree_preds.std())
+
+        return point_estimate, uncertainty
+
+    def predict_batch(
+        self,
+        X: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Predict for a batch of samples.
+
+        Returns (predictions, uncertainties) each of shape (n_samples,).
+        """
+        if self._model is None:
+            raise RuntimeError("No model loaded or trained.")
+        X = np.asarray(X, dtype=float)
+        X_processed = clr_transform(X) if self._apply_clr else X
+
+        scaler = self._model.named_steps["scaler"]
+        estimator = self._model.named_steps["est"]
+        X_scaled = scaler.transform(X_processed)
+
+        predictions = estimator.predict(X_scaled)
+        if self.model_type == "random_forest" and hasattr(estimator, "estimators_"):
+            tree_matrix = np.vstack([t.predict(X_scaled) for t in estimator.estimators_])
+            uncertainties = tree_matrix.std(axis=0)
+        else:
+            uncertainties = np.zeros(len(predictions))
+
+        return predictions, uncertainties
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def save(self, model_path: str | Path) -> None:
+        """Persist the trained model to disk (joblib format)."""
+        if self._model is None:
+            raise RuntimeError("No model to save — train first.")
+        try:
+            import joblib
+        except ImportError as exc:
+            raise ImportError("joblib is required for model serialization: pip install joblib") from exc
+
+        model_path = Path(model_path)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "model": self._model,
+            "model_type": self.model_type,
+            "feature_names": self._feature_names,
+            "apply_clr": self._apply_clr,
+        }
+        joblib.dump(payload, model_path)
+        logger.info("FunctionalPredictor saved to %s", model_path)
 
     @classmethod
     def load(cls, model_path: str | Path) -> "FunctionalPredictor":
-        raise NotImplementedError
+        """Load a previously saved FunctionalPredictor from disk."""
+        try:
+            import joblib
+        except ImportError as exc:
+            raise ImportError("joblib is required: pip install joblib") from exc
 
-    def train(self, X, y) -> "FunctionalPredictor":
-        """Train on feature matrix X and target labels y."""
-        raise NotImplementedError
+        payload = joblib.load(str(model_path))
+        obj = cls(model_type=payload["model_type"])
+        obj._model = payload["model"]
+        obj._feature_names = payload.get("feature_names", [])
+        obj._apply_clr = payload.get("apply_clr", True)
+        logger.info("FunctionalPredictor loaded from %s", model_path)
+        return obj
 
-    def predict(self, features) -> tuple[float, float]:
-        """Return (predicted_score, uncertainty_estimate)."""
-        raise NotImplementedError
+    # ------------------------------------------------------------------
+    # Feature importance
+    # ------------------------------------------------------------------
 
-    def save(self, model_path: str | Path) -> None:
-        raise NotImplementedError
+    def feature_importances(self) -> dict[str, float]:
+        """Return feature importance dict {feature_name: importance}."""
+        if self._model is None:
+            return {}
+        estimator = self._model.named_steps["est"]
+        if not hasattr(estimator, "feature_importances_"):
+            return {}
+        importances = estimator.feature_importances_
+        names = self._feature_names or [f"feature_{i}" for i in range(len(importances))]
+        return dict(zip(names, importances.tolist()))

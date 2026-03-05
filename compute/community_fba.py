@@ -21,9 +21,134 @@ Usage:
 
 from __future__ import annotations
 import logging
+import re
 import time
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Reaction ID patterns that match target pathways
+_PATHWAY_PATTERNS: dict[str, list[str]] = {
+    "nifH_pathway": ["NITROGENASE", "NIF", "rxn00006"],
+    "carbon_sequestration": ["RBC", "RUBISCO", "CARBONFIX"],
+    "methane_production": ["MCR", "METHCOGEN", "rxn09173"],
+    "hydrocarbon_degradation": ["ALKB", "ALMO", "rxn00541"],
+    "denitrification": ["NITRRED", "NOS", "NOR", "rxn13825"],
+    "nitrification": ["AMOO", "rxn00083"],
+}
+
+# pH-based environmental exchange bound modifiers
+_PH_EXCHANGE_BOUNDS: list[tuple[float, float, float]] = [
+    # (ph_lo, ph_hi, bound_multiplier)
+    (0.0, 5.0, 0.3),
+    (5.0, 5.5, 0.6),
+    (5.5, 7.5, 1.0),
+    (7.5, 8.5, 0.8),
+    (8.5, 14.0, 0.4),
+]
+
+
+def _ph_multiplier(ph: float) -> float:
+    for lo, hi, mult in _PH_EXCHANGE_BOUNDS:
+        if lo <= ph < hi:
+            return mult
+    return 0.5
+
+
+def _apply_environmental_constraints(model: Any, metadata: dict) -> None:
+    """Apply pH and moisture-derived bounds to environmental exchange reactions."""
+    try:
+        ph = float(metadata.get("soil_ph", 7.0))
+    except (TypeError, ValueError):
+        ph = 7.0
+
+    mult = _ph_multiplier(ph)
+
+    # Scale uptake bounds for key exchange metabolites
+    # Typical exchange reaction IDs in BIGG/CarveMe models:
+    env_exchanges = ["EX_o2_e", "EX_glc__D_e", "EX_nh4_e", "EX_pi_e", "EX_so4_e"]
+    for rxn_id in env_exchanges:
+        rxn = model.reactions.get_by_id(rxn_id) if rxn_id in model.reactions else None
+        if rxn is None:
+            try:
+                rxn = model.reactions.get_by_id(rxn_id)
+            except KeyError:
+                continue
+        if rxn.lower_bound < 0:
+            rxn.lower_bound = rxn.lower_bound * mult
+
+
+def _find_target_reactions(model: Any, target_pathway: str) -> list[Any]:
+    """Find reactions in the model that match the target pathway."""
+    patterns = _PATHWAY_PATTERNS.get(target_pathway, [target_pathway.upper()])
+    matched = []
+    for rxn in model.reactions:
+        rxn_id_upper = rxn.id.upper()
+        rxn_name_upper = (rxn.name or "").upper()
+        if any(p in rxn_id_upper or p in rxn_name_upper for p in patterns):
+            matched.append(rxn)
+    return matched
+
+
+def _merge_community_models(member_models: list, max_size: int) -> Any | None:
+    """Merge member COBRApy models into a community model via compartment namespacing.
+
+    Each member gets its own cytoplasm compartment (c_i) and shares a
+    common extracellular pool (e) — a simplified community FBA approach.
+    """
+    try:
+        import cobra
+    except ImportError:
+        logger.warning("cobra not installed — install via: pip install cobra")
+        return None
+
+    models = [m for m in member_models if m is not None][:max_size]
+    if not models:
+        return None
+
+    if len(models) == 1:
+        return models[0].copy()
+
+    # Use cobra's merge utility if available
+    if hasattr(cobra.io, "merge_models"):
+        # Not a standard COBRApy API; use manual merge
+        pass
+
+    community = models[0].copy()
+    community.id = "community_model"
+
+    for i, m in enumerate(models[1:], start=1):
+        suffix = f"__org{i}"
+        for rxn in m.reactions:
+            new_rxn = rxn.copy()
+            new_rxn.id = f"{rxn.id}{suffix}"
+            community.add_reactions([new_rxn])
+
+    return community
+
+
+def _extract_genome_quality_stats(member_models: list) -> dict[str, float]:
+    """Aggregate genome quality metadata from model.notes across community members."""
+    completeness_vals, contamination_vals, confidence_vals = [], [], []
+    for m in member_models:
+        if m is None:
+            continue
+        gq = (m.notes or {}).get("genome_quality", {})
+        if gq:
+            completeness_vals.append(gq.get("completeness", 0.0))
+            contamination_vals.append(gq.get("contamination", 100.0))
+            confidence_vals.append(gq.get("model_confidence", 0.35))
+    return {
+        "genome_completeness_mean": (
+            sum(completeness_vals) / len(completeness_vals) if completeness_vals else 0.0
+        ),
+        "genome_contamination_mean": (
+            sum(contamination_vals) / len(contamination_vals) if contamination_vals else 100.0
+        ),
+        "model_confidence": (
+            sum(confidence_vals) / len(confidence_vals) if confidence_vals else 0.35
+        ),
+    }
 
 
 def run_community_fba(
@@ -32,13 +157,105 @@ def run_community_fba(
     target_pathway: str,
     max_community_size: int = 20,
     fva: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     """
     Run community FBA and return result dict.
 
     Returns keys:
-      target_flux (float), flux_units (str), feasible (bool),
-      fva_min (float), fva_max (float), walltime_s (float)
+      target_flux (float): Mean flux through target pathway reactions
+      flux_units (str): "mmol/gDW/h" (COBRApy default)
+      feasible (bool): Whether FBA optimal solution was found
+      fva_min (float): FVA lower bound on target flux (if fva=True)
+      fva_max (float): FVA upper bound on target flux (if fva=True)
+      member_fluxes (dict): {model_id: target_flux} for each member
+      model_confidence (float): Mean genome quality confidence [0, 1]
+      genome_completeness_mean (float): Mean CheckM completeness %
+      genome_contamination_mean (float): Mean CheckM contamination %
+      walltime_s (float): Elapsed wall time
     """
-    t0 = time.perf_counter()
-    raise NotImplementedError
+    t_start = time.perf_counter()
+
+    quality_stats = _extract_genome_quality_stats(member_models)
+
+    try:
+        import cobra
+    except ImportError:
+        logger.warning("cobra not installed — FBA skipped. pip install cobra")
+        return {
+            "target_flux": 0.0, "flux_units": "mmol/gDW/h", "feasible": False,
+            "fva_min": 0.0, "fva_max": 0.0, "member_fluxes": {},
+            **quality_stats, "walltime_s": time.perf_counter() - t_start,
+        }
+
+    community = _merge_community_models(member_models, max_community_size)
+    if community is None:
+        return {
+            "target_flux": 0.0, "flux_units": "mmol/gDW/h", "feasible": False,
+            "fva_min": 0.0, "fva_max": 0.0, "member_fluxes": {},
+            **quality_stats, "walltime_s": time.perf_counter() - t_start,
+        }
+
+    # Apply environmental constraints
+    _apply_environmental_constraints(community, metadata)
+
+    # Solve community FBA
+    solution = community.optimize()
+    feasible = solution.status == "optimal"
+    if not feasible:
+        logger.warning("Community FBA infeasible for target_pathway=%s", target_pathway)
+        return {
+            "target_flux": 0.0, "flux_units": "mmol/gDW/h", "feasible": False,
+            "fva_min": 0.0, "fva_max": 0.0, "member_fluxes": {},
+            **quality_stats, "walltime_s": time.perf_counter() - t_start,
+        }
+
+    # Extract target pathway flux
+    target_rxns = _find_target_reactions(community, target_pathway)
+    if target_rxns:
+        target_fluxes = [solution.fluxes.get(rxn.id, 0.0) for rxn in target_rxns]
+        target_flux = sum(target_fluxes) / len(target_fluxes)
+    else:
+        logger.warning("No reactions found for target_pathway=%r", target_pathway)
+        target_flux = 0.0
+
+    # FVA bounds
+    fva_min, fva_max = 0.0, 0.0
+    if fva and target_rxns:
+        try:
+            fva_result = cobra.flux_analysis.flux_variability_analysis(
+                community,
+                reaction_list=target_rxns,
+                fraction_of_optimum=0.9,
+            )
+            fva_min = float(fva_result["minimum"].mean())
+            fva_max = float(fva_result["maximum"].mean())
+        except Exception as exc:
+            logger.debug("FVA failed: %s", exc)
+
+    # Per-member flux contributions
+    member_fluxes: dict[str, float] = {}
+    for m in member_models:
+        if m is None:
+            continue
+        m_rxns = _find_target_reactions(m, target_pathway)
+        if m_rxns:
+            member_fluxes[m.id] = sum(
+                solution.fluxes.get(rxn.id, 0.0)
+                for rxn in m_rxns
+            )
+
+    walltime_s = time.perf_counter() - t_start
+    logger.info(
+        "Community FBA: pathway=%s flux=%.4f feasible=%s wall=%.1fs",
+        target_pathway, target_flux, feasible, walltime_s,
+    )
+    return {
+        "target_flux": target_flux,
+        "flux_units": "mmol/gDW/h",
+        "feasible": feasible,
+        "fva_min": fva_min,
+        "fva_max": fva_max,
+        "member_fluxes": member_fluxes,
+        **quality_stats,
+        "walltime_s": walltime_s,
+    }

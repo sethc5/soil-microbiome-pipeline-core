@@ -257,6 +257,13 @@ MIGRATION_SQL: list[tuple[str, str]] = [
     ("runs",         "t1_genome_contamination_mean REAL"),
     ("runs",         "t1_model_confidence TEXT"),
     ("runs",         "t2_confidence TEXT"),
+    ("runs",         "t025_n_pathways INTEGER"),
+    ("runs",         "t025_nsti_mean REAL"),
+    ("runs",         "t1_metabolic_exchanges TEXT"),
+    ("runs",         "t2_resistance REAL"),
+    ("runs",         "t2_resilience REAL"),
+    ("runs",         "t2_functional_redundancy REAL"),
+    ("runs",         "t2_interventions TEXT"),
 ]
 
 
@@ -479,6 +486,121 @@ class SoilDB:
             "SELECT * FROM taxa WHERE taxon_id = ?", (taxon_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    def get_run_for_community(self, community_id: int) -> dict | None:
+        """Return the most recent run row for a given community_id."""
+        row = self.conn.execute(
+            "SELECT * FROM runs WHERE community_id = ? ORDER BY run_id DESC LIMIT 1",
+            (community_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Tier update convenience wrappers
+    # ------------------------------------------------------------------
+
+    def update_community_t025(self, community_id: int, data: dict) -> None:
+        """Update T0.25 results on the most recent run for this community."""
+        run = self.get_run_for_community(community_id)
+        column_map = {
+            "t025_pathway_abundances": "t025_model",   # store as JSON in t025_model column
+            "t025_n_pathways": "t025_n_pathways",
+            "t025_nsti_mean": "t025_nsti_mean",
+            "t025_top_similarity": "t025_similarity_score",
+            "t025_top_reference_id": "t025_similarity_hit",
+            "t025_function_score": "t025_function_score",
+            "t025_function_uncertainty": "t025_uncertainty",
+            "t025_passed": "t025_pass",
+        }
+        updates: dict = {}
+        for src, dst in column_map.items():
+            if src in data:
+                updates[dst] = data[src]
+        # Also store pathway abundances JSON in t025_model field if present
+        if "t025_pathway_abundances" in data:
+            updates["t025_model"] = data["t025_pathway_abundances"][:4000] if data["t025_pathway_abundances"] else ""
+
+        if run is not None:
+            self.update_run(run["run_id"], updates)
+        else:
+            # Insert minimal run row
+            sample_id = self.conn.execute(
+                "SELECT sample_id FROM communities WHERE community_id = ?", (community_id,)
+            ).fetchone()
+            if sample_id:
+                row_id = self.insert_run({
+                    "sample_id": sample_id[0], "community_id": community_id,
+                    "target_id": None, "t0_pass": True,
+                })
+                self.update_run(row_id, updates)
+
+    def update_community_t1(self, community_id: int, data: dict) -> None:
+        """Update T1 FBA results on the most recent run for this community."""
+        run = self.get_run_for_community(community_id)
+        column_map = {
+            "t1_target_flux": "t1_target_flux",
+            "t1_fva_min": "t1_flux_lower_bound",
+            "t1_fva_max": "t1_flux_upper_bound",
+            "t1_feasible": "t1_feasible",
+            "t1_model_confidence": "t1_model_confidence",
+            "t1_genome_completeness_mean": "t1_genome_completeness_mean",
+            "t1_genome_contamination_mean": "t1_genome_contamination_mean",
+            "t1_keystone_taxa": "t1_keystone_taxa",
+            "t1_passed": "t1_pass",
+        }
+        updates: dict = {}
+        for src, dst in column_map.items():
+            if src in data:
+                val = data[src]
+                # Convert model_confidence float → tier string for TEXT column
+                if dst == "t1_model_confidence" and isinstance(val, float):
+                    val = "high" if val >= 0.85 else "medium" if val >= 0.60 else "low"
+                updates[dst] = val
+
+        if run is not None:
+            self.update_run(run["run_id"], updates)
+        else:
+            sample_id = self.conn.execute(
+                "SELECT sample_id FROM communities WHERE community_id = ?", (community_id,)
+            ).fetchone()
+            if sample_id:
+                row_id = self.insert_run({
+                    "sample_id": sample_id[0], "community_id": community_id,
+                    "target_id": None, "t0_pass": True,
+                })
+                self.update_run(row_id, updates)
+
+    def update_community_t2(self, community_id: int, data: dict) -> None:
+        """Update T2 dynamics results on the most recent run for this community."""
+        run = self.get_run_for_community(community_id)
+        column_map = {
+            "t2_stability_score": "t2_stability_score",
+            "t2_resistance": "t2_resistance",
+            "t2_resilience": "t2_resilience",
+            "t2_functional_redundancy": "t2_functional_redundancy",
+            "t2_interventions": "t2_interventions",
+            "t2_top_intervention": "t2_best_intervention",
+            "t2_top_confidence": "t2_intervention_effect",
+            "t2_establishment_prob": "t2_establishment_prob",
+            "t2_passed": "t2_pass",
+        }
+        updates: dict = {}
+        for src, dst in column_map.items():
+            if src in data:
+                updates[dst] = data[src]
+
+        if run is not None:
+            self.update_run(run["run_id"], updates)
+        else:
+            sample_id = self.conn.execute(
+                "SELECT sample_id FROM communities WHERE community_id = ?", (community_id,)
+            ).fetchone()
+            if sample_id:
+                row_id = self.insert_run({
+                    "sample_id": sample_id[0], "community_id": community_id,
+                    "target_id": None, "t0_pass": True,
+                })
+                self.update_run(row_id, updates)
 
     # ------------------------------------------------------------------
     # Reporting helpers
