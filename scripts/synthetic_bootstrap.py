@@ -483,8 +483,9 @@ def _build_reference_biom(db_path: str, biom_out: Path, min_bnf: float = 0.65,
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command("generate")
-def generate(
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
     n_communities:  int           = typer.Option(100_000, "--n-communities", "-n"),
     workers:        int           = typer.Option(36,      "--workers",       "-w"),
     db_path:        Path          = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),

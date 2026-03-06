@@ -269,8 +269,9 @@ def _insert_findings(conn: sqlite3.Connection, findings: list[dict]) -> int:
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command("run")
-def run(
+@app.callback(invoke_without_command=True)
+def main(
+    ctx:         typer.Context,
     db_path:     Path          = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     results_dir: Path          = typer.Option(Path("/opt/pipeline/results"), "--results-dir"),
     config_path: Path          = typer.Option(Path("/opt/pipeline/config.example.yaml"), "--config"),

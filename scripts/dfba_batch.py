@@ -373,8 +373,9 @@ def _write_results(db_path: str, results: list[dict]) -> int:
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command("run")
-def run(
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
     db_path:      Path          = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     min_bnf:      float         = typer.Option(0.60,  "--min-bnf"),
     n_communities:int           = typer.Option(10_000, "--n-communities", "-n"),

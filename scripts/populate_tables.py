@@ -304,8 +304,9 @@ def _populate_receipts(conn: sqlite3.Connection) -> int:
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
-@app.command("run")
-def run(
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
     db_path: Path = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     log_path: Optional[Path] = typer.Option(
         Path("/var/log/pipeline/populate_tables.log"), "--log"
