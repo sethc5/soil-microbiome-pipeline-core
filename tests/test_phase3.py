@@ -102,10 +102,10 @@ class TestGenomeFetcher:
         cache_dir.mkdir()
         fetcher = GenomeFetcher(genome_db={}, cache_dir=str(cache_dir))
 
-        # Pre-populate cache
+        # Pre-populate cache with >100 bytes so the size-guard passes
         cache_key = fetcher._cache_key("12345")
         cached_file = cache_dir / cache_key
-        cached_file.write_text(">fake\nACGT\n")
+        cached_file.write_text(">fake_genome\n" + "ACGT" * 30 + "\n")
 
         result = fetcher.fetch(taxon_id="12345", taxon_name="Fake sp.")
         assert str(result) == str(cached_file)
