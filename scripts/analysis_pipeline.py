@@ -500,8 +500,9 @@ def _phylum_importance(communities: list[dict]) -> list[dict]:
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command("run")
-def run(
+@app.callback(invoke_without_command=True)
+def main(
+    ctx:      typer.Context,
     db_path:  Path = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     top:      int  = typer.Option(1000, "--top"),
     k:        int  = typer.Option(20,   "--clusters", "-k"),
