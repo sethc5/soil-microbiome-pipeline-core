@@ -23,11 +23,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from compute._tool_resolver import resolve_tool
+
 logger = logging.getLogger(__name__)
 
 
+def _prokka_cmd() -> str | None:
+    """Return path to prokka executable, checking conda envs."""
+    return resolve_tool("prokka") or shutil.which("prokka")
+
+
 def _prokka_available() -> bool:
-    return shutil.which("prokka") is not None
+    return _prokka_cmd() is not None
 
 
 def _count_genes_from_txt(txt_path: Path) -> dict[str, int]:
@@ -101,7 +108,7 @@ def annotate_genome(
         }
 
     cmd = [
-        "prokka",
+        _prokka_cmd(),
         "--outdir", str(outdir),
         "--prefix", stem,
         "--kingdom", kingdom,

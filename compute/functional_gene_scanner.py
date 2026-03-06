@@ -35,6 +35,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from compute._tool_resolver import resolve_tool
+
 logger = logging.getLogger(__name__)
 
 
@@ -287,10 +289,12 @@ def scan_functional_genes(
         return results
 
     # --- Path A: MMseqs2 ---
-    if shutil.which("mmseqs") and db_dir:
+    _mmseqs = resolve_tool("mmseqs") or shutil.which("mmseqs")
+    if _mmseqs and db_dir:
         try:
             _mmseqs_scan(results, path, target_genes, db_dir,
-                         mmseqs_threads, min_identity, min_coverage)
+                         mmseqs_threads, min_identity, min_coverage,
+                         mmseqs_cmd=_mmseqs)
             return results
         except Exception as exc:
             logger.warning("MMseqs2 scan failed (%s), falling back to keyword scan", exc)
@@ -426,6 +430,7 @@ def _mmseqs_scan(
     threads: int,
     min_identity: float,
     min_coverage: float,
+    mmseqs_cmd: str = "mmseqs",
 ) -> None:
     """
     Run MMseqs2 easy-search against per-gene reference databases.
@@ -441,7 +446,7 @@ def _mmseqs_scan(
 
         # Build query DB
         subprocess.run(
-            ["mmseqs", "createdb", str(fasta_path), str(query_db)],
+            [mmseqs_cmd, "createdb", str(fasta_path), str(query_db)],
             check=True, capture_output=True,
         )
 
@@ -457,7 +462,7 @@ def _mmseqs_scan(
             try:
                 subprocess.run(
                     [
-                        "mmseqs", "search",
+                        mmseqs_cmd, "search",
                         str(query_db), str(ref_db), str(result_db), str(tmp),
                         "--threads", str(threads),
                         "--min-seq-id", str(min_identity),
@@ -468,7 +473,7 @@ def _mmseqs_scan(
                     check=True, capture_output=True,
                 )
                 subprocess.run(
-                    ["mmseqs", "convertalis", str(query_db), str(ref_db),
+                    [mmseqs_cmd, "convertalis", str(query_db), str(ref_db),
                      str(result_db), str(aln_file)],
                     check=True, capture_output=True,
                 )

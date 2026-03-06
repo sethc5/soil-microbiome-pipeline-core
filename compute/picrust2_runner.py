@@ -20,14 +20,23 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from compute._tool_resolver import resolve_tool
+
 logger = logging.getLogger(__name__)
 
 
-def _picrust2_available() -> bool:
+def _picrust2_cmd() -> str | None:
+    """Return path to picrust2_pipeline executable, checking conda envs."""
     return (
-        shutil.which("picrust2_pipeline.py") is not None
-        or shutil.which("picrust2_pipeline") is not None
+        resolve_tool("picrust2_pipeline.py")
+        or resolve_tool("picrust2_pipeline")
+        or shutil.which("picrust2_pipeline.py")
+        or shutil.which("picrust2_pipeline")
     )
+
+
+def _picrust2_available() -> bool:
+    return _picrust2_cmd() is not None
 
 
 def _parse_abundance_table(path: Path) -> dict[str, float]:
@@ -103,7 +112,7 @@ def run_picrust2(
         return {"pathway_abundances": {}, "ko_abundances": {}, "nsti_mean": float("nan")}
 
     cmd = [
-        "picrust2_pipeline.py",
+        _picrust2_cmd(),
         "-s", str(rep_seqs_fasta),
         "-i", str(asv_table_biom),
         "-o", str(outdir),

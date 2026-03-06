@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from compute._tool_resolver import resolve_tool
+
 logger = logging.getLogger(__name__)
 
 # Quality tier thresholds
@@ -35,8 +37,13 @@ MEDIUM_COMPLETENESS = 70.0
 MEDIUM_CONTAMINATION = 10.0
 
 
+def _checkm_cmd() -> str | None:
+    """Return path to checkm executable, checking conda envs."""
+    return resolve_tool("checkm") or shutil.which("checkm")
+
+
 def _checkm_available() -> bool:
-    return shutil.which("checkm") is not None
+    return _checkm_cmd() is not None
 
 
 def _assign_tier(completeness: float, contamination: float) -> str:
@@ -136,7 +143,7 @@ def assess_genome_quality(
         # Step 1: lineage_wf
         subprocess.run(
             [
-                "checkm", "lineage_wf",
+                _checkm_cmd(), "lineage_wf",
                 "--tab_table",
                 "-t", str(threads),
                 "-x", genome_fasta.suffix.lstrip(".") or "fasta",
@@ -151,7 +158,7 @@ def assess_genome_quality(
         # Step 2: qa
         result = subprocess.run(
             [
-                "checkm", "qa",
+                _checkm_cmd(), "qa",
                 str(lineage_out),
                 str(outdir),
                 "-o", "2",
