@@ -18,6 +18,7 @@ set -euo pipefail
 DB="/data/pipeline/db/soil_microbiome.db"
 LOG_DIR="/var/log/pipeline"
 WORKERS=36
+SKIP_INGEST=false
 SKIP_BOOTSTRAP=false
 SKIP_T1=false
 SKIP_DFBA=false
@@ -28,12 +29,13 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --db)            DB="$2"; shift 2 ;;
     --workers)       WORKERS="$2"; shift 2 ;;
+    --skip-ingest)   SKIP_INGEST=true; shift ;;
     --skip-bootstrap) SKIP_BOOTSTRAP=true; shift ;;
     --skip-t1)       SKIP_T1=true; shift ;;
     --skip-dfba)     SKIP_DFBA=true; shift ;;
     --skip-climate)  SKIP_CLIMATE=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--db PATH] [--workers N] [--skip-bootstrap] [--skip-t1] [--skip-dfba] [--skip-climate]"
+      echo "Usage: $0 [--db PATH] [--workers N] [--skip-ingest] [--skip-bootstrap] [--skip-t1] [--skip-dfba] [--skip-climate]"
       exit 0 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -78,7 +80,7 @@ log "╠════════════════════════
 log "║  DB:      $DB"
 log "║  Workers: $WORKERS"
 log "║  Log:     $MASTER_LOG"
-log "║  Skip:    bootstrap=$SKIP_BOOTSTRAP t1=$SKIP_T1 dfba=$SKIP_DFBA climate=$SKIP_CLIMATE"
+log "║  Skip:    ingest=$SKIP_INGEST bootstrap=$SKIP_BOOTSTRAP t1=$SKIP_T1 dfba=$SKIP_DFBA climate=$SKIP_CLIMATE"
 log "╚══════════════════════════════════════════════════════════════╝"
 
 PIPELINE_START=$(date +%s)
@@ -97,6 +99,21 @@ with SoilDB('$DB') as db:
     print(f'Schema OK — tables: {tables}')
 " 2>&1 | tee -a "$MASTER_LOG"
 log "✓ Database initialized"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase -2: Real Data Ingest (SRA + MGnify)
+# Pulls metagenome accessions and metadata into the samples table.
+# Safe to skip on first synthetic run (--skip-ingest).
+# ══════════════════════════════════════════════════════════════════════════════
+if [[ "$SKIP_INGEST" == "false" ]]; then
+  run_phase "Ingest NEON + SRA metagenomes" \
+    python scripts/ingest.py both \
+      --db "$DB" \
+      --workers "$WORKERS" \
+      --sra-max 5000
+else
+  log "⏭ Skipping ingest (--skip-ingest set)"
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 0: Synthetic Bootstrap (T0 + T0.25)
@@ -120,6 +137,17 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 run_phase "Populate Tables (targets/taxa/receipts)" \
   python scripts/populate_tables.py --db "$DB"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 1b: Fetch Reference Proteomes
+# Downloads NCBI proteomes for all genera present in the seeded communities.
+# Needed before CarveMe model building in Phase 4. Idempotent.
+# ══════════════════════════════════════════════════════════════════════════════
+run_phase "Fetch Reference Literature" \
+  python scripts/fetch_references.py
+
+run_phase "Gapfill Reference Literature" \
+  python scripts/fetch_references_gapfill.py
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 2: T2 dFBA Batch (dynamic FBA ODE simulations)
@@ -181,13 +209,42 @@ run_phase "Intervention Screening" \
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 6: Analysis Pipeline
-# Post-simulation analysis: correlations, ranking, spatial, climate resilience.
-# Produces JSON/CSV outputs in results/.
+# Delegates to canonical standalone modules then collects climate resilience.
 # ══════════════════════════════════════════════════════════════════════════════
-run_phase "Analysis Pipeline" \
+run_phase "Correlation Scan" \
+  python correlation_scanner.py scan \
+    --db "$DB" \
+    --config config.example.yaml \
+    --output results/correlation_findings.json
+
+run_phase "Rank Candidates" \
+  python rank_candidates.py rank \
+    --db "$DB" \
+    --config config.example.yaml \
+    --output results/ranked_candidates.csv \
+    --top 1000
+
+run_phase "Spatial Analysis" \
+  python spatial_analysis.py analyze \
+    --db "$DB" \
+    --output-dir results/spatial/ \
+    --top 1000 \
+    --n-clusters 20
+
+run_phase "Taxa Enrichment" \
+  python taxa_enrichment.py enrich \
+    --db "$DB" \
+    --output results/taxa_enrichment.csv
+
+# Climate resilience + master summary (not covered by standalone modules)
+run_phase "Climate Resilience + Summary" \
   python scripts/analysis_pipeline.py \
     --db "$DB" \
-    --out-dir results/
+    --out-dir results/ \
+    --skip-correlations \
+    --skip-ranking \
+    --skip-spatial \
+    --skip-enrichment
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 7: Generate Findings

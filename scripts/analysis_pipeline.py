@@ -523,12 +523,20 @@ def _phylum_importance(communities: list[dict]) -> list[dict]:
 
 @app.callback(invoke_without_command=True)
 def main(
-    ctx:      typer.Context,
-    db_path:  Path = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
-    top:      int  = typer.Option(1000, "--top"),
-    k:        int  = typer.Option(20,   "--clusters", "-k"),
-    out_dir:  Path = typer.Option(Path("/opt/pipeline/results"), "--out-dir"),
-    log_path: Optional[Path] = typer.Option(Path("/var/log/pipeline/analysis_pipeline.log"), "--log"),
+    ctx:               typer.Context,
+    db_path:           Path = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
+    top:               int  = typer.Option(1000, "--top"),
+    k:                 int  = typer.Option(20,   "--clusters", "-k"),
+    out_dir:           Path = typer.Option(Path("/opt/pipeline/results"), "--out-dir"),
+    log_path:          Optional[Path] = typer.Option(Path("/var/log/pipeline/analysis_pipeline.log"), "--log"),
+    skip_correlations: bool = typer.Option(False, "--skip-correlations",
+                                           help="Skip correlation analysis (handled by correlation_scanner.py)"),
+    skip_ranking:      bool = typer.Option(False, "--skip-ranking",
+                                           help="Skip candidate ranking (handled by rank_candidates.py)"),
+    skip_spatial:      bool = typer.Option(False, "--skip-spatial",
+                                           help="Skip spatial clustering (handled by spatial_analysis.py)"),
+    skip_enrichment:   bool = typer.Option(False, "--skip-enrichment",
+                                           help="Skip taxa enrichment (handled by taxa_enrichment.py)"),
 ):
     """Run full analysis pipeline: correlations, ranking, spatial, climate resilience."""
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
@@ -552,40 +560,61 @@ def main(
     logger.info("Climate projections loaded for %d communities", len(projections))
 
     # --- Correlation analysis ---
-    findings = _correlation_analysis(communities)
-    (out_dir / "correlation_findings.json").write_text(json.dumps(findings, indent=2))
-    logger.info("correlation_findings.json written (%d findings)", len(findings))
+    if not skip_correlations:
+        findings = _correlation_analysis(communities)
+        (out_dir / "correlation_findings.json").write_text(json.dumps(findings, indent=2))
+        logger.info("correlation_findings.json written (%d findings)", len(findings))
+    else:
+        logger.info("Skipping correlation analysis (delegated to correlation_scanner.py)")
+        findings = json.loads((out_dir / "correlation_findings.json").read_text()) \
+            if (out_dir / "correlation_findings.json").exists() else []
 
     # --- Rank candidates (sets composite_score on each community dict) ---
-    ranked = _rank_candidates(communities, top=top)
-    rank_csv = out_dir / "ranked_candidates.csv"
-    if ranked:
-        fieldnames = ["rank", "community_id", "composite_score", "t1_target_flux",
-                      "t2_stability_score", "bnf_score", "ph", "organic_matter",
-                      "temperature_c", "precipitation_mm", "latitude", "longitude",
-                      "site_id", "land_use"]
-        with open(rank_csv, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for i, rec in enumerate(ranked, start=1):
-                rec["rank"] = i
-                writer.writerow({k: rec.get(k, "") for k in fieldnames})
-        logger.info("ranked_candidates.csv written (%d rows)", len(ranked))
+    if not skip_ranking:
+        ranked = _rank_candidates(communities, top=top)
+        rank_csv = out_dir / "ranked_candidates.csv"
+        if ranked:
+            fieldnames = ["rank", "community_id", "composite_score", "t1_target_flux",
+                          "t2_stability_score", "bnf_score", "ph", "organic_matter",
+                          "temperature_c", "precipitation_mm", "latitude", "longitude",
+                          "site_id", "land_use"]
+            with open(rank_csv, "w", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+                writer.writeheader()
+                for i, rec in enumerate(ranked, start=1):
+                    rec["rank"] = i
+                    writer.writerow({k: rec.get(k, "") for k in fieldnames})
+            logger.info("ranked_candidates.csv written (%d rows)", len(ranked))
+    else:
+        logger.info("Skipping candidate ranking (delegated to rank_candidates.py)")
+        # Still need composite_score on community dicts for climate resilience
+        ranked = _rank_candidates(communities, top=len(communities))
 
     # --- Spatial clustering ---
-    clusters = _spatial_clusters(communities, k=k)
-    (out_dir / "spatial_clusters.json").write_text(json.dumps(clusters, indent=2))
-    logger.info("spatial_clusters.json written (%d clusters)", len(clusters))
+    if not skip_spatial:
+        clusters = _spatial_clusters(communities, k=k)
+        (out_dir / "spatial_clusters.json").write_text(json.dumps(clusters, indent=2))
+        logger.info("spatial_clusters.json written (%d clusters)", len(clusters))
+    else:
+        logger.info("Skipping spatial clustering (delegated to spatial_analysis.py)")
+        clusters = []
 
     # --- Site summaries ---
-    site_summ = _site_summaries(communities)
-    (out_dir / "site_summaries.json").write_text(json.dumps(site_summ, indent=2))
-    logger.info("site_summaries.json written (%d sites)", len(site_summ))
+    if not skip_spatial:
+        site_summ = _site_summaries(communities)
+        (out_dir / "site_summaries.json").write_text(json.dumps(site_summ, indent=2))
+        logger.info("site_summaries.json written (%d sites)", len(site_summ))
+    else:
+        site_summ = []
 
-    # --- Phylum importance ---
-    phylum_imp = _phylum_importance(communities)
-    (out_dir / "phylum_importance.json").write_text(json.dumps(phylum_imp, indent=2))
-    logger.info("phylum_importance.json written (%d phyla)", len(phylum_imp))
+    # --- Phylum importance / taxa enrichment ---
+    if not skip_enrichment:
+        phylum_imp = _phylum_importance(communities)
+        (out_dir / "phylum_importance.json").write_text(json.dumps(phylum_imp, indent=2))
+        logger.info("phylum_importance.json written (%d phyla)", len(phylum_imp))
+    else:
+        logger.info("Skipping phylum importance (delegated to taxa_enrichment.py)")
+        phylum_imp = []
 
     # --- Climate resilience ---
     climate_rows = _climate_resilience(communities, projections)

@@ -1,0 +1,26 @@
+[Unit]
+Description=Soil Microbiome Pipeline API (FastAPI / uvicorn)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/pipeline
+Environment="PIPELINE_DB=/data/pipeline/db/soil_microbiome.db"
+Environment="PIPELINE_RESULTS=/opt/pipeline/results"
+Environment="PIPELINE_TARGET_ID=nitrogen-fixation-pipeline"
+ExecStart=/opt/pipeline/.venv/bin/uvicorn api.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pipeline-api
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Soil Microbiome Pipeline — Nightly Ingest Timer
+
+[Timer]
+# Run at 02:30 UTC every night
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

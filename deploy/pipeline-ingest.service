@@ -1,0 +1,18 @@
+[Unit]
+Description=Soil Microbiome Pipeline — Nightly Ingest (NEON + SRA)
+After=network.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/pipeline
+EnvironmentFile=-/opt/pipeline/.env
+ExecStart=/opt/pipeline/.venv/bin/python scripts/ingest.py both \
+    --db /data/pipeline/db/soil_microbiome.db \
+    --workers 36 \
+    --sra-max 2000 \
+    --log /var/log/pipeline/ingest-nightly.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pipeline-ingest
