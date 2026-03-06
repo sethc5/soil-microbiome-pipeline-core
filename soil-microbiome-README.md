@@ -882,4 +882,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Highest value contributions:
 
 ## License
 
-MIT
+This repository is licensed under the GNU Affero General Public License
+version 3.0 only (AGPL-3.0-only). See the LICENSE file in this repository
+for details.
