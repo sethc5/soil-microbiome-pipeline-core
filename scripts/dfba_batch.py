@@ -48,7 +48,7 @@ if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
 logger = logging.getLogger(__name__)
-app = typer.Typer(help="Batch dFBA ODE simulations for top BNF communities", add_completion=False)
+app = typer.Typer(help="Batch dFBA ODE simulations for top BNF communities", add_completion=False, invoke_without_command=True)
 
 # ---------------------------------------------------------------------------
 # ODE model constants (Monod kinetics, soil typical values)
@@ -373,7 +373,7 @@ def _write_results(db_path: str, results: list[dict]) -> int:
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command()
+@app.command("run")
 def run(
     db_path:      Path          = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     min_bnf:      float         = typer.Option(0.60,  "--min-bnf"),

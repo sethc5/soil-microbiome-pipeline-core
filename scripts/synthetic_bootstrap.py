@@ -46,7 +46,7 @@ if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
 logger = logging.getLogger(__name__)
-app = typer.Typer(help="Generate synthetic communities and train FunctionalPredictor", add_completion=False)
+app = typer.Typer(help="Generate synthetic communities and train FunctionalPredictor", add_completion=False, invoke_without_command=True)
 
 # ---------------------------------------------------------------------------
 # Phyla in the model (12 major bacterial/archaeal phyla found in soil)
@@ -483,7 +483,7 @@ def _build_reference_biom(db_path: str, biom_out: Path, min_bnf: float = 0.65,
 # CLI
 # ---------------------------------------------------------------------------
 
-@app.command()
+@app.command("generate")
 def generate(
     n_communities:  int           = typer.Option(100_000, "--n-communities", "-n"),
     workers:        int           = typer.Option(36,      "--workers",       "-w"),
