@@ -1,0 +1,140 @@
+# configs/bioremediation.yaml — Hydrocarbon bioremediation pipeline instantiation
+#
+# Third instantiation demonstrating pipeline generality (Phase 7).
+# Inverted context: targets contaminated soils (not pristine), high pH tolerance.
+# Key T0 gates: alkB / xylE / catA functional genes, heavy metal co-tolerance.
+#
+# Validate with: python config_schema.py --validate configs/bioremediation.yaml
+# Run with:      python pipeline_core.py --config configs/bioremediation.yaml \
+#                  --samples-json samples.json --tier 0
+
+project:
+  name: "bioremediation-pipeline"
+  application: "bioremediation"
+  description: >
+    Identify soil communities with hydrocarbon degradation potential for
+    in-situ bioremediation of petroleum-contaminated industrial sites.
+    Inverted context: sourced from contaminated soils, not pristine grasslands.
+    Targets alkane (alkB), aromatic (xylE, catA), and PAH degradation pathways.
+  version: "1.0.0"
+
+target:
+  id: "hydrocarbon_degradation"
+  application: "bioremediation"
+  target_function: "hydrocarbon_degradation"
+  target_flux:
+    alkane_degradation:
+      min: 0.01
+      optimal: ">0.05"
+      units: "mmol_per_g_soil_per_day"
+    aromatic_degradation:
+      min: 0.005
+      units: "mmol_per_g_soil_per_day"
+  off_targets:
+    - "methanogenesis"          # unwanted anaerobic byproduct
+    - "sulfate_reduction"       # H2S production — corrosive, toxic
+  soil_context:
+    ph_range: [5.0, 9.0]         # wide range: contaminated sites vary enormously
+    texture: []                  # no texture restriction for remediation
+    climate_zone: []             # no climate restriction
+    land_use: ["industrial", "brownfield", "agricultural_contaminated"]
+  intervention_types:
+    - "biostimulation"    # nutrient addition to stimulate native degraders
+    - "bioaugmentation"   # inoculate with hydrocarbon-degrading consortia
+    - "amendment"         # surfactants, electron acceptors
+
+sequence_source:
+  primary: "sra"
+  sra_query:
+    biome: "contaminated soil"
+    sequencing_type: ["16S", "shotgun_metagenome"]
+    min_depth: 30000             # lower depth OK for contaminated site studies
+    metadata_required: ["latitude", "longitude", "contamination_type"]
+  supplementary:
+    - source: "mgnify"
+      biome_lineage: "root:Environmental:Terrestrial:Contaminated"
+    - source: "local"
+      biom_dir: "data/contaminated_sites/"
+
+filters:
+  t0:
+    min_sequencing_depth: 30000
+    min_observed_otus: 200      # contaminated soils have lower diversity — expected
+    ph_range: [4.0, 10.0]
+    required_functional_genes: ["alkB", "xylE", "catA"]   # hydrocarbon degradation
+    exclude_contaminated: false  # INVERTED: we want contaminated soils
+    min_soil_organic_matter: null
+    exclude_flooded: false
+    required_sampling_fraction: null  # all fractions accepted
+    min_fungal_bacterial_ratio: null  # not relevant for this application
+
+  t025:
+    ml_models: ["random_forest_biorem", "gradient_boost_functional"]
+    min_function_score: 0.35     # lower threshold: contaminated site data is noisier
+    min_target_gene_abundance: 0.002
+    reference_db: "reference/hydrocarbon_degrading_communities.biom"
+    min_similarity: 0.25
+
+  t1:
+    fba_engine: "cobrapy"
+    community_size_limit: 10    # smaller consortia for focused degradation
+    genome_db: "bv-brc"
+    min_target_flux: 0.2
+    max_fba_walltime_min: 30
+    min_genome_completeness: 65.0   # slightly relaxed for metagenome-assembled genomes
+    max_genome_contamination: 15.0  # contaminated site MAGs are lower quality
+
+  t2:
+    dynamics_engine: "dfba"
+    simulation_time_days: 60    # faster remediation timescale than ecological processes
+    perturbations:
+      - type: "nutrient_addition"    # biostimulation pulse
+        day: 0
+        severity: -0.5              # negative = stimulation (reduce limitation)
+      - type: "oxygen_injection"     # bioventing
+        day: 7
+        severity: -0.3
+    intervention_screen:
+      biostimulation:
+        - type: "nitrogen_amendment"
+          rates_kg_ha: [10, 25, 50]
+        - type: "phosphate_amendment"
+          rates_kg_ha: [5, 10, 25]
+      bioaugmentation:
+        - "Pseudomonas_putida_F1"         # toluene/xylene degrader
+        - "Rhodococcus_ruber_LL6"         # alkane degrader
+        - "Sphingomonas_paucimobilis"     # PAH degrader
+        - "Acinetobacter_calcoaceticus"   # emulsifier + alkane degrader
+        - "Burkholderia_cepacia_JS872"    # chlorinated compound degrader
+      surfactants:
+        - type: "rhamnolipid"
+          rates_mg_kg: [10, 50, 100]
+        - type: "sophorolipid"
+          rates_mg_kg: [10, 50, 100]
+    min_stability_score: 0.4    # lower: contaminated soils are inherently unstable
+    min_establishment_prob: 0.3
+    propagate_confidence: true
+
+fungal:
+  include_its_track: false    # fungi secondary for hydrocarbon degradation
+  its_database: "unite"
+  amf_database: null
+  its_min_similarity: 0.97
+  min_fungal_bacterial_ratio: null
+  require_its_data: false
+
+compute:
+  workers: 8
+  fba_workers: 6
+  batch_size: 4000
+  t1_batch_size: 30
+  t2_batch_size: 2
+  checkpoint_interval: 100
+
+output:
+  db_path: "bioremediation_landscape.db"
+  receipts_dir: "receipts/"
+  results_dir: "results/"
+  top_n: 30
+  export_community_profiles: true
+  export_intervention_report: true

@@ -1,0 +1,140 @@
+# configs/carbon_sequestration.yaml — Carbon sequestration pipeline instantiation
+#
+# Demonstrates pipeline generality (Phase 7, Easy Win #7).
+# Validates the fungi / ITS code path (Gap 1) and F:B ratio filter.
+#
+# Validate with: python config_schema.py --validate configs/carbon_sequestration.yaml
+# Run with:      python pipeline_core.py --config configs/carbon_sequestration.yaml \
+#                  --samples-json samples.json --tier 0
+
+project:
+  name: "carbon-sequestration-pipeline"
+  application: "carbon_sequestration"
+  description: >
+    Identify soil communities driving net soil organic carbon accumulation
+    in temperate grasslands and regenerative agriculture systems.
+    Emphasis on fungal communities (lignin degradation), ectomycorrhizal networks,
+    and suppression of methanogenesis / N2O production.
+  version: "1.0.0"
+
+target:
+  id: "soil_organic_carbon_accumulation"
+  application: "carbon_sequestration"
+  target_function: "soil_organic_carbon_accumulation"
+  target_flux:
+    carbon_sequestration:
+      min: 0.1
+      optimal: ">0.5"
+      units: "g_C_per_kg_soil_per_year"
+    lignin_degradation:
+      min: 0.05
+      units: "relative_abundance_score"
+  off_targets:
+    - "methane_production"        # GHG — avoid
+    - "nitrous_oxide_production"  # GHG — avoid
+    - "carbon_mineralisation"     # net C loss — avoid
+  soil_context:
+    ph_range: [5.5, 7.5]
+    texture: ["loam", "clay_loam", "silt_loam", "silty_clay_loam"]
+    climate_zone: ["Cfb", "Cfa", "Dfb", "Dfa"]   # temperate oceanic / continental
+    land_use: ["grassland", "cropland", "regenerative_agriculture"]
+  intervention_types:
+    - "amendment"       # biochar, compost, manure
+    - "management"      # no-till, cover cropping, perennial pasture
+    - "bioinoculant"    # mycorrhizal inoculants, PGPF
+
+sequence_source:
+  primary: "sra"
+  sra_query:
+    biome: "grassland"
+    sequencing_type: ["ITS", "16S", "shotgun_metagenome"]
+    min_depth: 50000
+    metadata_required: ["soil_ph", "latitude", "longitude", "land_use", "organic_matter_pct"]
+  supplementary:
+    - source: "mgnify"
+      biome_lineage: "root:Environmental:Terrestrial:Grassland"
+    - source: "neon"
+      domain_ids: ["D01", "D02", "D05", "D07", "D08"]  # temperate/grassland NEON domains
+    - source: "emp"
+      empo_3: "Soil (non-saline)"
+
+filters:
+  t0:
+    min_sequencing_depth: 50000
+    min_observed_otus: 400
+    ph_range: [5.0, 8.0]
+    required_functional_genes: ["laccase", "peroxidase"]  # lignin degradation markers
+    exclude_contaminated: true
+    min_soil_organic_matter: 1.0    # must have measurable SOM baseline
+    exclude_flooded: true
+    required_sampling_fraction: ["bulk", "rhizosphere"]
+    # Fungi critical for C sequestration — enforce F:B ratio gate
+    min_fungal_bacterial_ratio: 0.3
+    required_its_data: true
+
+  t025:
+    ml_models: ["random_forest_cseq", "gradient_boost_functional"]
+    min_function_score: 0.45
+    min_target_gene_abundance: 0.005
+    reference_db: "reference/high_cseq_communities.biom"
+    min_similarity: 0.3
+
+  t1:
+    fba_engine: "cobrapy"
+    community_size_limit: 15
+    genome_db: "bv-brc"
+    min_target_flux: 0.3
+    max_fba_walltime_min: 45
+    min_genome_completeness: 70.0
+    max_genome_contamination: 10.0
+
+  t2:
+    dynamics_engine: "dfba"
+    simulation_time_days: 180   # seasonal cycle
+    perturbations:
+      - type: "drought"
+        day: 90
+        severity: 0.4
+      - type: "grazing_event"
+        day: 60
+        severity: 0.2
+    intervention_screen:
+      amendments:
+        - type: "biochar"
+          rates_t_ha: [1, 2, 5, 10]
+        - type: "compost"
+          rates_t_ha: [2, 5, 10, 20]
+        - type: "manure"
+          rates_t_ha: [5, 10, 20]
+      bioinoculants:
+        - "Rhizophagus_irregularis"     # AM fungi
+        - "Pisolithus_tinctorius"       # ECM fungi
+        - "Trichoderma_harzianum"       # PGPF
+        - "Phanerochaete_chrysosporium" # lignin degrader
+    min_stability_score: 0.55
+    min_establishment_prob: 0.35
+    propagate_confidence: true
+
+fungal:
+  include_its_track: true
+  its_database: "unite"
+  amf_database: "maarjam"
+  its_min_similarity: 0.97
+  min_fungal_bacterial_ratio: 0.3
+  require_its_data: true
+
+compute:
+  workers: 8
+  fba_workers: 4
+  batch_size: 6000
+  t1_batch_size: 40
+  t2_batch_size: 2
+  checkpoint_interval: 100
+
+output:
+  db_path: "carbon_seq_landscape.db"
+  receipts_dir: "receipts/"
+  results_dir: "results/"
+  top_n: 50
+  export_community_profiles: true
+  export_intervention_report: true
