@@ -928,34 +928,22 @@ def run_t025_batch(
         except Exception as exc:
             logger.warning("T0.25: could not load reference BIOM %s: %s", ref_biom, exc)
 
-    # Query T0 passers for this batch
+    # Query all T0 passers that haven't been T0.25-scored yet.
+    # (target_id is not reliably populated so we don't filter on it;
+    #  t025_pass IS NULL is the idempotency guard.)
     try:
         with db._connect() as conn:
-            if batch_run_label:
-                rows = conn.execute(
-                    """
-                    SELECT r.run_id, r.community_id, r.sample_id,
-                           c.phylum_profile, c.top_genera
-                    FROM runs r
-                    JOIN communities c ON r.community_id = c.community_id
-                    WHERE r.t0_pass = 1
-                      AND r.t025_pass IS NULL
-                      AND r.target_id LIKE ?
-                    ORDER BY r.run_id
-                    """,
-                    (f"%{batch_run_label}%",),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT r.run_id, r.community_id, r.sample_id,
-                           c.phylum_profile, c.top_genera
-                    FROM runs r
-                    JOIN communities c ON r.community_id = c.community_id
-                    WHERE r.t0_pass = 1
-                      AND r.t025_pass IS NULL
-                    """,
-                ).fetchall()
+            rows = conn.execute(
+                """
+                SELECT r.run_id, r.community_id, r.sample_id,
+                       c.phylum_profile, c.top_genera
+                FROM runs r
+                JOIN communities c ON r.community_id = c.community_id
+                WHERE r.t0_pass = 1
+                  AND r.t025_pass IS NULL
+                ORDER BY r.run_id
+                """,
+            ).fetchall()
     except Exception as exc:
         logger.error("T0.25: could not query T0 passers: %s", exc)
         return {"n_processed": 0, "n_passed": 0, "n_failed": 0, "errors": [str(exc)]}
