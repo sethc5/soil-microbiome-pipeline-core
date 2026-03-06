@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Soil Microbiome Pipeline | Functional Soil Community Analysis</title>
+  <meta name="description" content="A computational pipeline that screens public soil metagenomics data to identify microbial communities with high potential for nitrogen fixation, carbon sequestration, and bioremediation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green-dark:  #1a3a2a;
+      --green-mid:   #2d5a3d;
+      --green-light: #4a8c5c;
+      --green-pale:  #e8f2ec;
+      --soil:        #7a5c3a;
+      --soil-light:  #f5f0ea;
+      --text:        #1a1a1a;
+      --text-muted:  #5a5a5a;
+      --border:      #dde8e2;
+      --white:       #ffffff;
+      --shadow:      0 2px 16px rgba(0,0,0,0.08);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      color: var(--text);
+      background: var(--white);
+      line-height: 1.6;
+    }
+
+    /* ── NAV ─────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--green-dark);
+      padding: 0 2rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 60px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .nav-brand {
+      color: var(--white);
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-decoration: none;
+    }
+    .nav-links { display: flex; gap: 1.75rem; list-style: none; }
+    .nav-links a {
+      color: rgba(255,255,255,0.8);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--white); }
+    .nav-cta {
+      background: var(--green-light);
+      color: var(--white) !important;
+      padding: 0.4rem 1rem;
+      border-radius: 6px;
+      transition: background 0.2s !important;
+    }
+    .nav-cta:hover { background: #5aad70 !important; }
+
+    /* ── HERO ────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, var(--green-dark) 0%, var(--green-mid) 60%, #3d7a50 100%);
+      color: var(--white);
+      padding: 6rem 2rem 5rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; max-width: 800px; margin: 0 auto; }
+    .hero-tag {
+      display: inline-block;
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.9);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.9rem;
+      border-radius: 20px;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(2.2rem, 5vw, 3.4rem);
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 em { font-style: italic; color: #a8d5b5; }
+    .hero p {
+      font-size: 1.1rem;
+      color: rgba(255,255,255,0.82);
+      max-width: 620px;
+      margin: 0 auto 2.25rem;
+      font-weight: 300;
+    }
+    .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 1.6rem;
+      border-radius: 8px;
+      font-size: 0.925rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
+    .btn-primary { background: var(--white); color: var(--green-dark); }
+    .btn-outline { background: transparent; color: var(--white); border: 2px solid rgba(255,255,255,0.5); }
+    .btn-outline:hover { border-color: var(--white); }
+
+    /* ── STAT BAR ────────────────────────────────────── */
+    .stat-bar {
+      background: var(--soil-light);
+      border-bottom: 1px solid var(--border);
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+      gap: 4rem;
+      flex-wrap: wrap;
+    }
+    .stat { text-align: center; }
+    .stat-num {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--green-mid);
+      display: block;
+    }
+    .stat-label { font-size: 0.82rem; color: var(--text-muted); font-weight: 500; }
+
+    /* ── SECTIONS ────────────────────────────────────── */
+    section { padding: 5rem 2rem; }
+    .container { max-width: 1080px; margin: 0 auto; }
+    .section-tag {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--green-light);
+      margin-bottom: 0.75rem;
+    }
+    .section-title {
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(1.8rem, 3.5vw, 2.4rem);
+      color: var(--green-dark);
+      margin-bottom: 1rem;
+      line-height: 1.2;
+    }
+    .section-sub {
+      font-size: 1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 3rem;
+    }
+
+    /* ── HOW IT WORKS ────────────────────────────────── */
+    #how { background: var(--white); }
+    .funnel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.5rem;
+    }
+    .funnel-step {
+      background: var(--green-pale);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem 1.5rem;
+      position: relative;
+    }
+    .funnel-step::after {
+      content: '→';
+      position: absolute;
+      right: -1.1rem; top: 50%;
+      transform: translateY(-50%);
+      color: var(--green-light);
+      font-size: 1.5rem;
+      font-weight: 300;
+    }
+    .funnel-step:last-child::after { display: none; }
+    .step-tier {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--green-light);
+      text-transform: uppercase;
+      margin-bottom: 0.4rem;
+    }
+    .step-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--green-dark);
+      margin-bottom: 0.6rem;
+    }
+    .step-desc { font-size: 0.85rem; color: var(--text-muted); }
+    .step-badge {
+      display: inline-block;
+      margin-top: 0.75rem;
+      background: var(--green-mid);
+      color: var(--white);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+    }
+
+    /* ── APPLICATIONS ────────────────────────────────── */
+    #applications { background: var(--soil-light); }
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .app-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 2rem;
+      box-shadow: var(--shadow);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .app-card:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+    .app-icon {
+      font-size: 2.25rem;
+      margin-bottom: 1rem;
+      display: block;
+    }
+    .app-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--green-dark);
+      margin-bottom: 0.5rem;
+    }
+    .app-target {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--green-light);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.75rem;
+    }
+    .app-desc { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.25rem; }
+    .app-metrics { list-style: none; }
+    .app-metrics li {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      padding: 0.3rem 0;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+    }
+    .app-metrics li:first-child { border-top: none; }
+    .metric-val { font-weight: 600; color: var(--green-mid); }
+
+    /* ── WHO IT SERVES ───────────────────────────────── */
+    #who { background: var(--white); }
+    .who-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+    .who-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      display: flex;
+      gap: 1rem;
+    }
+    .who-icon {
+      font-size: 1.75rem;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .who-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--green-dark);
+      margin-bottom: 0.35rem;
+    }
+    .who-desc { font-size: 0.85rem; color: var(--text-muted); }
+
+    /* ── DATA ────────────────────────────────────────── */
+    #data { background: var(--green-dark); color: var(--white); }
+    #data .section-title { color: var(--white); }
+    #data .section-tag { color: #a8d5b5; }
+    #data .section-sub { color: rgba(255,255,255,0.7); }
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .data-item {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+    }
+    .data-item-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #a8d5b5;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.35rem;
+    }
+    .data-item-desc { font-size: 0.875rem; color: rgba(255,255,255,0.75); }
+
+    /* ── CONTACT ─────────────────────────────────────── */
+    #contact { background: var(--soil-light); }
+    .contact-wrap {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: start;
+    }
+    @media (max-width: 700px) { .contact-wrap { grid-template-columns: 1fr; gap: 2rem; } }
+    .contact-text p { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1rem; }
+    .contact-detail {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    .contact-detail strong { color: var(--text); }
+    form { display: flex; flex-direction: column; gap: 1rem; }
+    label { font-size: 0.82rem; font-weight: 600; color: var(--text); display: block; margin-bottom: 0.3rem; }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.65rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-family: inherit;
+      font-size: 0.9rem;
+      background: var(--white);
+      color: var(--text);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--green-light);
+      box-shadow: 0 0 0 3px rgba(74,140,92,0.12);
+    }
+    textarea { resize: vertical; min-height: 110px; }
+    .btn-submit {
+      background: var(--green-mid);
+      color: var(--white);
+      border: none;
+      padding: 0.8rem 1.75rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s, transform 0.15s;
+      width: 100%;
+    }
+    .btn-submit:hover { background: var(--green-dark); transform: translateY(-1px); }
+    .form-note { font-size: 0.78rem; color: var(--text-muted); text-align: center; }
+    #form-success {
+      display: none;
+      background: var(--green-pale);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: center;
+      color: var(--green-dark);
+      font-weight: 500;
+    }
+
+    /* ── FOOTER ──────────────────────────────────────── */
+    footer {
+      background: var(--green-dark);
+      color: rgba(255,255,255,0.6);
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.82rem;
+    }
+    footer a { color: rgba(255,255,255,0.8); text-decoration: none; }
+    footer a:hover { color: var(--white); }
+    .footer-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; max-width: 1080px; margin: 0 auto; }
+
+    /* ── RESPONSIVE ──────────────────────────────────── */
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .funnel-step::after { display: none; }
+      .stat-bar { gap: 2rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-brand" href="#">Soil Microbiome Pipeline</a>
+  <ul class="nav-links">
+    <li><a href="#how">How It Works</a></li>
+    <li><a href="#applications">Applications</a></li>
+    <li><a href="#who">Who It Serves</a></li>
+    <li><a href="#data">Data Sources</a></li>
+    <li><a href="#contact" class="nav-cta">Request Analysis</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner">
+    <span class="hero-tag">Open Science · Soil Microbiology · Functional Metagenomics</span>
+    <h1>Identify soil communities that <em>actually work</em></h1>
+    <p>A computational pipeline that screens tens of thousands of public soil metagenomes to find microbial communities with verified potential for nitrogen fixation, carbon sequestration, and bioremediation — ranked, mapped, and ready to act on.</p>
+    <div class="hero-actions">
+      <a href="#contact" class="btn btn-primary">Request a Regional Analysis</a>
+      <a href="https://github.com/sethc5/soil-microbiome-pipeline-core" target="_blank" rel="noopener" class="btn btn-outline">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- STAT BAR -->
+<div class="stat-bar">
+  <div class="stat">
+    <span class="stat-num">8+</span>
+    <span class="stat-label">Public Data Sources</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">4-Tier</span>
+    <span class="stat-label">Screening Funnel</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">3</span>
+    <span class="stat-label">Target Applications</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">AGPL-3.0</span>
+    <span class="stat-label">Open Source</span>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section id="how">
+  <div class="container">
+    <p class="section-tag">Methodology</p>
+    <h2 class="section-title">Four-tier screening funnel</h2>
+    <p class="section-sub">Each tier narrows the candidate pool using increasingly rigorous — and computationally expensive — methods. Only communities that pass all filters reach the ranked output.</p>
+    <div class="funnel">
+      <div class="funnel-step">
+        <div class="step-tier">Tier 0</div>
+        <div class="step-name">Data Intake &amp; Quality Filter</div>
+        <div class="step-desc">Pulls sequencing data from SRA, MGnify, EMP, QIITA, and NEON. Filters on sequencing depth, soil pH range, functional gene presence (nifH, dsrAB, mcrA), and metadata completeness.</div>
+        <span class="step-badge">Fast · Millions of samples</span>
+      </div>
+      <div class="funnel-step">
+        <div class="step-tier">Tier 0.25</div>
+        <div class="step-name">ML Functional Prediction</div>
+        <div class="step-desc">Random forest and gradient boosting models predict target function scores. Community similarity search finds nearest high-performing reference communities.</div>
+        <span class="step-badge">Minutes per community</span>
+      </div>
+      <div class="funnel-step">
+        <div class="step-tier">Tier 1</div>
+        <div class="step-name">Metabolic Modeling</div>
+        <div class="step-desc">Community flux balance analysis (FBA) via genome-scale models. Predicts actual metabolic flux through target pathways. Identifies keystone taxa.</div>
+        <span class="step-badge">Hours per community</span>
+      </div>
+      <div class="funnel-step">
+        <div class="step-tier">Tier 2</div>
+        <div class="step-name">Dynamics &amp; Intervention</div>
+        <div class="step-desc">Dynamic FBA simulates community stability over time. Screens bioinoculant and amendment interventions. Predicts establishment probability and off-target effects.</div>
+        <span class="step-badge">Top candidates only</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- APPLICATIONS -->
+<section id="applications">
+  <div class="container">
+    <p class="section-tag">Target Applications</p>
+    <h2 class="section-title">Three proven configurations</h2>
+    <p class="section-sub">Each application is a pre-built configuration targeting a specific ecosystem service. The same pipeline core, different scientific objectives.</p>
+    <div class="app-grid">
+
+      <div class="app-card">
+        <span class="app-icon">🌱</span>
+        <div class="app-target">Nitrogen Cycling</div>
+        <div class="app-title">Biological Nitrogen Fixation</div>
+        <div class="app-desc">Identifies communities with high BNF potential for dryland wheat and other commodity crops. Targets reduction of synthetic nitrogen fertilizer dependency — a direct input cost and emissions driver.</div>
+        <ul class="app-metrics">
+          <li><span>Target flux</span><span class="metric-val">≥ 0.5 mmol N/g soil/day</span></li>
+          <li><span>Key functional gene</span><span class="metric-val">nifH (HGT-validated)</span></li>
+          <li><span>Soil context</span><span class="metric-val">pH 5.5–7.5, semi-arid</span></li>
+          <li><span>Relevant crop</span><span class="metric-val">Wheat, sorghum, corn</span></li>
+        </ul>
+      </div>
+
+      <div class="app-card">
+        <span class="app-icon">🌍</span>
+        <div class="app-target">Climate Mitigation</div>
+        <div class="app-title">Soil Carbon Sequestration</div>
+        <div class="app-desc">Screens for communities driving net soil organic carbon accumulation in grassland and regenerative agriculture systems. Includes fungal community analysis, lignin degradation, and suppression of GHG-producing pathways.</div>
+        <ul class="app-metrics">
+          <li><span>Target flux</span><span class="metric-val">≥ 0.1 g C/kg soil/year</span></li>
+          <li><span>Key functional gene</span><span class="metric-val">laccase, mnp, lip</span></li>
+          <li><span>Soil context</span><span class="metric-val">Temperate grassland, regen-ag</span></li>
+          <li><span>Co-benefit</span><span class="metric-val">Suppresses methanogenesis</span></li>
+        </ul>
+      </div>
+
+      <div class="app-card">
+        <span class="app-icon">🏭</span>
+        <div class="app-target">Contaminated Site Restoration</div>
+        <div class="app-title">Hydrocarbon Bioremediation</div>
+        <div class="app-desc">Finds communities capable of in-situ degradation of petroleum hydrocarbons at contaminated industrial sites. Inverted context: sources communities from contaminated soils, not pristine environments.</div>
+        <ul class="app-metrics">
+          <li><span>Target flux</span><span class="metric-val">≥ 0.01 mmol/g soil/day</span></li>
+          <li><span>Key functional genes</span><span class="metric-val">alkB, xylE, catA</span></li>
+          <li><span>Soil context</span><span class="metric-val">pH 5.5–8.5, contaminated</span></li>
+          <li><span>Heavy metal tolerance</span><span class="metric-val">Co-screened</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- WHO IT SERVES -->
+<section id="who">
+  <div class="container">
+    <p class="section-tag">Partners &amp; Stakeholders</p>
+    <h2 class="section-title">Who this is built for</h2>
+    <p class="section-sub">The pipeline outputs — ranked community registries, intervention recommendations, and regional findings maps — are designed to be immediately actionable for these audiences.</p>
+    <div class="who-grid">
+      <div class="who-card">
+        <div class="who-icon">🏛️</div>
+        <div>
+          <div class="who-title">USDA / NRCS / State Ag Labs</div>
+          <div class="who-desc">Complement soil chemistry reports with microbial functional profiles. Support fertilizer reduction mandates with quantitative BNF community data.</div>
+        </div>
+      </div>
+      <div class="who-card">
+        <div class="who-icon">🌿</div>
+        <div>
+          <div class="who-title">Regenerative Agriculture NGOs</div>
+          <div class="who-desc">Quantitative microbial baselines for field trials. Identify which communities to inoculate and what amendments to pair for maximum establishment probability.</div>
+        </div>
+      </div>
+      <div class="who-card">
+        <div class="who-icon">🔬</div>
+        <div>
+          <div class="who-title">Soil Testing Laboratories</div>
+          <div class="who-desc">Add microbial functional prediction to existing chemistry reports. Differentiate from commodity lab services with community-level insights.</div>
+        </div>
+      </div>
+      <div class="who-card">
+        <div class="who-icon">⚡</div>
+        <div>
+          <div class="who-title">EPA / Environmental Consultants</div>
+          <div class="who-desc">Bioremediation pipeline output directly applicable to Superfund and brownfield site assessments. Rank candidate communities before expensive field trials.</div>
+        </div>
+      </div>
+      <div class="who-card">
+        <div class="who-icon">🌐</div>
+        <div>
+          <div class="who-title">International Research Programs</div>
+          <div class="who-desc">CGIAR, FAO Global Soil Partnership, and CGIAR centers focused on dryland wheat, smallholder fertility, and degraded land restoration.</div>
+        </div>
+      </div>
+      <div class="who-card">
+        <div class="who-icon">📊</div>
+        <div>
+          <div class="who-title">Climate Funders &amp; Foundations</div>
+          <div class="who-desc">Quantitative soil community data to underpin carbon credit methodologies and regenerative agriculture investment theses.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DATA SOURCES -->
+<section id="data">
+  <div class="container">
+    <p class="section-tag">Data Infrastructure</p>
+    <h2 class="section-title">Built on public metagenomics data</h2>
+    <p class="section-sub">The pipeline integrates eight major public repositories. No proprietary data required to run a global screening analysis.</p>
+    <div class="data-grid">
+      <div class="data-item">
+        <div class="data-item-name">NCBI SRA</div>
+        <div class="data-item-desc">Primary source for shotgun metagenomes and 16S amplicon datasets. Millions of soil samples globally.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">MGnify</div>
+        <div class="data-item-desc">EBI's metagenomics platform. Pre-analyzed functional profiles reduce compute requirements significantly.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">Earth Microbiome Project</div>
+        <div class="data-item-desc">Standardized 16S data from 30,000+ samples across biomes. Comprehensive soil_non-saline subset.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">Qiita</div>
+        <div class="data-item-desc">QIIME-processed amplicon data with rich metadata. Direct API integration for metadata-filtered queries.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">NEON</div>
+        <div class="data-item-desc">National Ecological Observatory Network. Long-term soil monitoring across US climate zones.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">redbiom</div>
+        <div class="data-item-desc">Cross-study metadata search. Enables targeted queries like "dryland wheat soils, pH 6.0–7.0, US Great Plains."</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">AGP</div>
+        <div class="data-item-desc">American Gut Project soil samples. Broad geographic coverage with standardized processing.</div>
+      </div>
+      <div class="data-item">
+        <div class="data-item-name">Local BIOM</div>
+        <div class="data-item-desc">Direct import of locally-generated OTU/ASV tables. Supports partner lab data ingestion alongside public sources.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact">
+  <div class="container">
+    <div class="contact-wrap">
+      <div class="contact-text">
+        <p class="section-tag">Get In Touch</p>
+        <h2 class="section-title">Request a regional analysis</h2>
+        <p>If you work in soil science, extension, ag research, or environmental consulting and want to see what the pipeline finds for your region or application — get in touch. Early collaborations are welcome.</p>
+        <p>We can work from publicly available data for any region, or integrate soil chemistry data you already have from local testing programs.</p>
+        <div class="contact-detail">
+          <span>📍</span>
+          <span><strong>Based in:</strong> Middle Tennessee</span>
+        </div>
+        <div class="contact-detail">
+          <span>💻</span>
+          <span><strong>Code:</strong> <a href="https://github.com/sethc5/soil-microbiome-pipeline-core" target="_blank">github.com/sethc5/soil-microbiome-pipeline-core</a></span>
+        </div>
+        <div class="contact-detail">
+          <span>⚖️</span>
+          <span><strong>License:</strong> AGPL-3.0 — open for research, commercial licensing available</span>
+        </div>
+      </div>
+
+      <div>
+        <!-- Replace YOUR_FORM_ID below with your Formspree form ID after signing up at formspree.io -->
+        <form id="contact-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+          <div>
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" placeholder="Dr. Jane Smith" required />
+          </div>
+          <div>
+            <label for="org">Organization</label>
+            <input type="text" id="org" name="organization" placeholder="USDA-ARS, Rodale Institute, etc." />
+          </div>
+          <div>
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" placeholder="you@organization.org" required />
+          </div>
+          <div>
+            <label for="interest">Primary interest</label>
+            <select id="interest" name="interest">
+              <option value="">Select one…</option>
+              <option value="nitrogen_fixation">Nitrogen fixation / fertilizer reduction</option>
+              <option value="carbon_sequestration">Soil carbon sequestration</option>
+              <option value="bioremediation">Bioremediation / contaminated sites</option>
+              <option value="soil_lab">Soil testing lab integration</option>
+              <option value="research_collab">Research collaboration / co-authorship</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label for="region">Geographic region or context</label>
+            <input type="text" id="region" name="region" placeholder="e.g. Middle Tennessee dryland corn, Pacific Northwest wheat" />
+          </div>
+          <div>
+            <label for="message">Anything else</label>
+            <textarea id="message" name="message" placeholder="Tell us about your soil data, research questions, or partnership interest…"></textarea>
+          </div>
+          <button type="submit" class="btn-submit">Send Request</button>
+          <p class="form-note">No spam — just science. We'll reply within a few days.</p>
+        </form>
+        <div id="form-success">
+          ✅ Thanks — we'll be in touch within a few days.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <span>© 2026 Soil Microbiome Pipeline Core · Licensed AGPL-3.0</span>
+    <span>
+      <a href="https://github.com/sethc5/soil-microbiome-pipeline-core" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/sethc5/soil-microbiome-pipeline-core/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/sethc5/soil-microbiome-pipeline-core/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  const form = document.getElementById('contact-form');
+  const success = document.getElementById('form-success');
+  if (form) {
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const data = new FormData(form);
+      const res = await fetch(form.action, {
+        method: 'POST',
+        body: data,
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        form.style.display = 'none';
+        success.style.display = 'block';
+      } else {
+        alert('Something went wrong — please email directly via GitHub.');
+      }
+    });
+  }
+</script>
+</body>
+</html>
