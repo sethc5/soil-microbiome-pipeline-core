@@ -40,7 +40,7 @@ if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
 logger = logging.getLogger(__name__)
-app = typer.Typer(help="Post-simulation analysis pipeline", add_completion=False)
+app = typer.Typer(help="Post-simulation analysis pipeline", add_completion=False, invoke_without_command=True)
 
 # ---------------------------------------------------------------------------
 # Statistics helpers
