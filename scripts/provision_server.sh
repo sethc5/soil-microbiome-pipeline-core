@@ -32,8 +32,15 @@
 # =============================================================================
 set -euo pipefail
 
-HOST="${1:-144.76.222.125}"
-KEY="${2:-$HOME/.ssh/id_ed25519_personal}"
+# Load .env if it exists (never committed — see .gitignore)
+ENV_FILE="$(dirname "$0")/../.env"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  set -a; source "$ENV_FILE"; set +a
+fi
+
+HOST="${1:-${HETZNER2_HOST:-144.76.222.125}}"
+KEY="${2:-${HETZNER2_KEY:-$HOME/.ssh/id_ed25519_personal}}"
 
 SSH_ROOT="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i $KEY root@$HOST"
 SSH_DEP="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i $KEY deploy@$HOST"
@@ -70,6 +77,21 @@ echo "deploy ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/deploy
 chmod 440 /etc/sudoers.d/deploy
 echo "deploy user ready"
 REMOTE
+
+# ── Pre-flight: verify deploy key works BEFORE locking root ──────────────────
+echo ""
+echo "--- Pre-flight: verifying deploy key access ---"
+if ! $SSH_DEP 'echo OK' 2>/dev/null | grep -q OK; then
+  echo "ERROR: Cannot log in as deploy with $KEY" >&2
+  echo "  Deploy user may not have the key yet, or sshd needs a moment." >&2
+  echo "  Waiting 5s and retrying..." >&2
+  sleep 5
+  if ! $SSH_DEP 'echo OK' 2>/dev/null | grep -q OK; then
+    echo "  Still failing — aborting before SSH hardening to avoid lockout." >&2
+    exit 1
+  fi
+fi
+echo "Deploy key login: OK — safe to harden root"
 
 # ── Phase 2: SSH hardening ────────────────────────────────────────────────────
 echo ""
