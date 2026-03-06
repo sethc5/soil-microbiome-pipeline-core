@@ -797,6 +797,212 @@ def run_t2_batch(
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# T0.25 batch runner
+# ---------------------------------------------------------------------------
+
+def _score_community_t025(
+    community_row: dict,
+    run_row: dict,
+    t025_cfg: dict,
+    predictor: Any,          # FunctionalPredictor | None
+    similarity_search: Any,  # CommunitySimilaritySearch | None
+) -> dict:
+    """
+    Score a single T0-passed community through the T0.25 layer.
+
+    Returns a result dict suitable for db.update_community_t025():
+        t025_function_score   float | None
+        t025_function_uncertainty  float | None
+        t025_top_similarity   float | None
+        t025_top_reference_id str | None
+        t025_passed           bool
+        t025_pathway_abundances str | None  (JSON)
+    """
+    import numpy as np
+
+    result: dict[str, Any] = {
+        "t025_function_score":        None,
+        "t025_function_uncertainty":  None,
+        "t025_top_similarity":        None,
+        "t025_top_reference_id":      None,
+        "t025_passed":                False,
+        "t025_pathway_abundances":    None,
+    }
+
+    min_score = float(t025_cfg.get("min_function_score", 0.5))
+    min_sim   = float(t025_cfg.get("min_similarity", 0.3))
+
+    # Build OTU/phylum abundance vector from community row
+    phylum_json = community_row.get("phylum_profile") or "{}"
+    try:
+        phylum_profile: dict[str, float] = json.loads(phylum_json)
+    except (json.JSONDecodeError, TypeError):
+        phylum_profile = {}
+
+    # --- ML functional prediction ---
+    if predictor is not None and phylum_profile:
+        try:
+            feature_names = sorted(phylum_profile.keys())
+            X = np.array([[phylum_profile.get(f, 0.0) for f in feature_names]])
+            score, uncertainty = predictor.predict(X[0])
+            result["t025_function_score"]       = float(score)
+            result["t025_function_uncertainty"] = float(uncertainty)
+            result["t025_pathway_abundances"]   = json.dumps({"ml_score": score})
+        except Exception as exc:
+            logger.debug("FunctionalPredictor failed on community %s: %s",
+                         community_row.get("community_id"), exc)
+
+    # --- Similarity search ---
+    if similarity_search is not None and phylum_profile:
+        try:
+            hits = similarity_search.query(phylum_profile, metric="braycurtis", top_k=1)
+            if hits:
+                result["t025_top_similarity"]   = float(hits[0]["similarity_score"])
+                result["t025_top_reference_id"] = str(hits[0]["reference_id"])
+        except Exception as exc:
+            logger.debug("SimilaritySearch failed on community %s: %s",
+                         community_row.get("community_id"), exc)
+
+    # --- Pass/fail ---
+    fn_score  = result["t025_function_score"]
+    sim_score = result["t025_top_similarity"]
+
+    # Pass if either signal clears its threshold (OR logic, not both required)
+    fn_pass  = fn_score  is not None and fn_score  >= min_score
+    sim_pass = sim_score is not None and sim_score >= min_sim
+
+    # If no models available (both None), pass through with a warning score
+    if fn_score is None and sim_score is None:
+        result["t025_passed"] = True   # no filter applied — pass through
+        result["t025_function_score"] = 0.5  # neutral sentinel
+    else:
+        result["t025_passed"] = fn_pass or sim_pass
+
+    return result
+
+
+def run_t025_batch(
+    config: "PipelineConfig",
+    db: "SoilDB",
+    workers: int = 4,
+    target_id: str = "default",
+    receipts_dir: "str | Path" = "receipts/",
+    batch_run_label: str = "",
+) -> dict[str, Any]:
+    """
+    Run T0.25 (ML scoring + similarity search) on all T0-passed communities
+    from the given batch_run_label.
+
+    Loads FunctionalPredictor model from config path if it exists.
+    Loads reference BIOM for similarity search from config path if it exists.
+    Falls back gracefully when models are absent — communities are passed through.
+
+    Returns:
+        {n_processed, n_passed, n_failed, errors}
+    """
+    from config_schema import T025Filters
+
+    t025_cfg_dict = config.filters.get("t025", {})
+    t025_cfg = T025Filters(**t025_cfg_dict)
+
+    # Load predictor (optional — don't fail if not trained yet)
+    predictor = None
+    model_path = Path(t025_cfg_dict.get("model_path", "models/functional_predictor.joblib"))
+    if model_path.exists():
+        try:
+            from compute.functional_predictor import FunctionalPredictor
+            predictor = FunctionalPredictor.load(str(model_path))
+            logger.info("T0.25: loaded FunctionalPredictor from %s", model_path)
+        except Exception as exc:
+            logger.warning("T0.25: could not load predictor from %s: %s", model_path, exc)
+
+    # Load similarity index (optional)
+    similarity_search = None
+    ref_biom = Path(t025_cfg_dict.get("reference_db", "reference/high_bnf_communities.biom"))
+    if ref_biom.exists():
+        try:
+            from compute.community_similarity import CommunitySimilaritySearch
+            similarity_search = CommunitySimilaritySearch.from_biom(str(ref_biom))
+            logger.info("T0.25: loaded reference BIOM (%d samples)", len(similarity_search.sample_ids))
+        except Exception as exc:
+            logger.warning("T0.25: could not load reference BIOM %s: %s", ref_biom, exc)
+
+    # Query T0 passers for this batch
+    try:
+        with db._connect() as conn:
+            if batch_run_label:
+                rows = conn.execute(
+                    """
+                    SELECT r.run_id, r.community_id, r.sample_id,
+                           c.phylum_profile, c.top_genera
+                    FROM runs r
+                    JOIN communities c ON r.community_id = c.community_id
+                    WHERE r.t0_pass = 1
+                      AND r.t025_pass IS NULL
+                      AND r.target_id LIKE ?
+                    ORDER BY r.run_id
+                    """,
+                    (f"%{batch_run_label}%",),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT r.run_id, r.community_id, r.sample_id,
+                           c.phylum_profile, c.top_genera
+                    FROM runs r
+                    JOIN communities c ON r.community_id = c.community_id
+                    WHERE r.t0_pass = 1
+                      AND r.t025_pass IS NULL
+                    """,
+                ).fetchall()
+    except Exception as exc:
+        logger.error("T0.25: could not query T0 passers: %s", exc)
+        return {"n_processed": 0, "n_passed": 0, "n_failed": 0, "errors": [str(exc)]}
+
+    logger.info("T0.25: %d T0-passed communities to score", len(rows))
+
+    n_passed = 0
+    n_failed = 0
+    errors: list[str] = []
+
+    t025_cfg_plain = t025_cfg.model_dump()
+
+    for row in rows:
+        community_id = row[1]
+        community_row = {
+            "community_id":  row[1],
+            "phylum_profile": row[3],
+            "top_genera":    row[4],
+        }
+        run_row = {"run_id": row[0]}
+        try:
+            result = _score_community_t025(
+                community_row=community_row,
+                run_row=run_row,
+                t025_cfg=t025_cfg_plain,
+                predictor=predictor,
+                similarity_search=similarity_search,
+            )
+            db.update_community_t025(community_id, result)
+            if result.get("t025_passed"):
+                n_passed += 1
+            else:
+                n_failed += 1
+        except Exception as exc:
+            n_failed += 1
+            errors.append(f"community_id={community_id}: {exc}")
+            logger.warning("T0.25 failed for community %s: %s", community_id, exc)
+
+    logger.info("T0.25 complete: %d passed / %d processed", n_passed, n_passed + n_failed)
+    return {
+        "n_processed": n_passed + n_failed,
+        "n_passed":    n_passed,
+        "n_failed":    n_failed,
+        "errors":      errors,
+    }
+
+
 # Typer CLI
 # ---------------------------------------------------------------------------
 
@@ -847,7 +1053,15 @@ def run(
             typer.echo(json.dumps(summary, indent=2))
 
         if tier in ("025", "1", "2", "all"):
-            typer.echo("T0.25 / T1 / T2: run --tier 0 first, then pass community_ids to run_t025_batch / run_t1_batch / run_t2_batch.")
+            t025_result = run_t025_batch(
+                config=pipeline_cfg,
+                db=db,
+                workers=workers,
+                target_id=target_id,
+                receipts_dir=receipts_dir,
+                batch_run_label=summary.get("batch_run_label", "") if tier != "all" else "",
+            )
+            typer.echo(json.dumps({"t025": t025_result}, indent=2))
 
 
 if __name__ == "__main__":
