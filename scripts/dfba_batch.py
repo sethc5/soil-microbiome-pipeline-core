@@ -136,7 +136,7 @@ def _build_odes(guild_init: dict, env: dict, perturbations: list[dict]):
         # Check perturbations at this time
         day_int = int(t)
         if day_int in pert_by_day:
-            p = pert_by_day.pop(day_int)
+            p = pert_by_day[day_int]
             ptype = p.get("type", "")
             sev   = float(p.get("severity", 0.5))
             if ptype == "drought":

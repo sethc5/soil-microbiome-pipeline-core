@@ -117,11 +117,11 @@ def _extract_phylum_importance(results_dir: Path) -> list[dict]:
             "description": (
                 f"{entry.get('phylum')} is a key driver of target flux variability "
                 f"(importance={entry.get('importance_score', 0):.3f}, "
-                f"mean_abundance={entry.get('mean_abundance', 0):.3f})"
+                f"mean_abundance_top_q={entry.get('mean_abundance_top_q', 0):.3f})"
             ),
             "statistical_support": json.dumps({
                 "importance_score": entry.get("importance_score"),
-                "mean_abundance": entry.get("mean_abundance"),
+                "mean_abundance_top_q": entry.get("mean_abundance_top_q"),
                 "method": "variance_importance",
             }),
         })
@@ -219,7 +219,7 @@ def _extract_summary_finding(db_path: str) -> dict:
     n_t1 = conn.execute("SELECT COUNT(*) FROM runs WHERE t1_pass = 1").fetchone()[0]
     n_t2 = conn.execute("SELECT COUNT(*) FROM runs WHERE t2_pass = 1").fetchone()[0]
     top_row = conn.execute(
-        "SELECT MAX(t1_target_flux), community_id FROM runs WHERE t1_pass = 1"
+        "SELECT t1_target_flux, community_id FROM runs WHERE t1_pass = 1 ORDER BY t1_target_flux DESC LIMIT 1"
     ).fetchone()
     n_interventions = conn.execute("SELECT COUNT(*) FROM interventions").fetchone()[0]
     conn.close()
@@ -342,8 +342,8 @@ def main(
         from findings_generator import _db_summary, _render_findings_md
         from db_utils import SoilDB
 
-        db = SoilDB(str(db_path))
-        db_sum = _db_summary(db)
+        with SoilDB(str(db_path)) as db:
+            db_sum = _db_summary(db)
         enriched_taxa: list = []
         taxa_csv = results_dir / "taxa_enrichment.csv"
         if taxa_csv.exists():

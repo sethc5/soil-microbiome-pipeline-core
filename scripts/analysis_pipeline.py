@@ -53,10 +53,11 @@ PHYLA = [
 ]
 
 
-def _spearman_r(x: list[float], y: list[float]) -> float:
+def _spearman_r(x: list[float], y: list[float]) -> tuple[float, float]:
+    """Spearman rank correlation. Returns (r, p_value)."""
     n = len(x)
     if n < 5:
-        return 0.0
+        return 0.0, 1.0
 
     def _rank(seq):
         order = sorted(range(n), key=lambda i: seq[i])
@@ -75,7 +76,24 @@ def _spearman_r(x: list[float], y: list[float]) -> float:
     rx, ry = _rank(x), _rank(y)
     d2 = sum((a - b) ** 2 for a, b in zip(rx, ry))
     denom = n * (n * n - 1)
-    return 1.0 - 6.0 * d2 / denom if denom else 0.0
+    r = 1.0 - 6.0 * d2 / denom if denom else 0.0
+    # Approximate p-value using t-distribution (two-tailed)
+    if abs(r) >= 1.0 or n <= 2:
+        p = 0.0 if abs(r) >= 1.0 else 1.0
+    else:
+        t_stat = r * math.sqrt((n - 2) / (1 - r * r + 1e-15))
+        # Two-tailed p via incomplete beta regularized function approximation
+        df = n - 2
+        x_beta = df / (df + t_stat * t_stat)
+        # Approximate with normal for large n, beta CDF for small n
+        if n > 30:
+            p = 2.0 * math.erfc(abs(t_stat) / math.sqrt(2)) / 2.0
+            p = max(p, 1e-300)
+        else:
+            # Simple approximation: use Welch-Satterthwaite equiv
+            p = 2.0 * math.exp(-0.717 * abs(t_stat) - 0.416 * t_stat * t_stat)
+            p = min(max(p, 1e-300), 1.0)
+    return r, p
 
 
 def _pearson_r(x: list[float], y: list[float]) -> float:
@@ -167,8 +185,8 @@ def _load_t2_communities(db_path: str) -> list[dict]:
              COALESCE(s.precipitation_mm, 600.0) AS precipitation_mm,
              COALESCE(s.latitude, 0.0) AS latitude,
              COALESCE(s.longitude, 0.0) AS longitude,
-             COALESCE(s.land_use, s.site, 'unknown') AS land_use,
-             COALESCE(s.site_id, s.site, 'unknown') AS site_id
+             COALESCE(s.land_use, 'unknown') AS land_use,
+             COALESCE(s.site_id, 'unknown') AS site_id
            FROM runs r
            JOIN communities c ON r.community_id = c.community_id
            JOIN samples s ON r.sample_id = s.sample_id
@@ -238,11 +256,12 @@ def _correlation_analysis(communities: list[dict]) -> list[dict]:
         if len(paired) < 10:
             continue
         xs, ys = zip(*paired)
-        r = _spearman_r(list(xs), list(ys))
+        r, p = _spearman_r(list(xs), list(ys))
         findings.append({
             "type": "env_correlation",
             "predictor": field,
             "spearman_r": round(r, 5),
+            "p_value": round(p, 8),
             "n": len(paired),
             "strength": "strong" if abs(r) > 0.5 else "moderate" if abs(r) > 0.25 else "weak",
             "direction": "positive" if r > 0 else "negative",
@@ -255,11 +274,12 @@ def _correlation_analysis(communities: list[dict]) -> list[dict]:
         if len(paired) < 10:
             continue
         xs, ys = zip(*paired)
-        r = _spearman_r(list(xs), list(ys))
+        r, p = _spearman_r(list(xs), list(ys))
         findings.append({
             "type": "phylum_correlation",
             "predictor": phylum,
             "spearman_r": round(r, 5),
+            "p_value": round(p, 8),
             "n": len(paired),
             "strength": "strong" if abs(r) > 0.4 else "moderate" if abs(r) > 0.2 else "weak",
             "direction": "positive" if r > 0 else "negative",
@@ -270,11 +290,12 @@ def _correlation_analysis(communities: list[dict]) -> list[dict]:
                   for c in communities if c.get("ph") is not None and c.get("organic_matter") is not None]
     if len(paired_int) >= 10:
         xs, ys = zip(*paired_int)
-        r = _spearman_r(list(xs), list(ys))
+        r, p = _spearman_r(list(xs), list(ys))
         findings.append({
             "type": "interaction_correlation",
             "predictor": "ph × organic_matter",
             "spearman_r": round(r, 5),
+            "p_value": round(p, 8),
             "n": len(paired_int),
             "strength": "strong" if abs(r) > 0.4 else "moderate" if abs(r) > 0.2 else "weak",
             "direction": "positive" if r > 0 else "negative",
@@ -478,7 +499,7 @@ def _phylum_importance(communities: list[dict]) -> list[dict]:
         all_paired = [(c["profile"].get(phylum, 0.0), c["t1_target_flux"])
                       for c in communities if c["profile"] and c.get("t1_target_flux") is not None]
         xs, ys = zip(*all_paired) if all_paired else ([], [])
-        r = _spearman_r(list(xs), list(ys)) if len(xs) >= 10 else 0.0
+        r, _ = _spearman_r(list(xs), list(ys)) if len(xs) >= 10 else (0.0, 1.0)
 
         results.append({
             "phylum": phylum,

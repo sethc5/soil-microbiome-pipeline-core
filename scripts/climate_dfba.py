@@ -113,7 +113,7 @@ def _run_ode(phylum_profile: dict, env: dict, perturbations: list[dict],
         p_fac = _precipitation_factor(t, precip_mm)
         day_int = int(t)
         if day_int in pert_by_day:
-            p = pert_by_day.pop(day_int)
+            p = pert_by_day[day_int]
             ptype = p.get("type", "")
             sev = float(p.get("severity", 0.5))
             if ptype == "drought":

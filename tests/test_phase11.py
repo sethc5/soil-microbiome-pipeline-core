@@ -305,17 +305,22 @@ class TestSpearmanR:
     def test_perfect_positive(self):
         x = [1, 2, 3, 4, 5]
         y = [2, 4, 6, 8, 10]
-        assert abs(_spearman_r(x, y) - 1.0) < 1e-9
+        r, p = _spearman_r(x, y)
+        assert abs(r - 1.0) < 1e-9
+        assert p == 0.0  # perfect correlation
 
     @skip_analysis
     def test_perfect_negative(self):
         x = [1, 2, 3, 4, 5]
         y = [5, 4, 3, 2, 1]
-        assert abs(_spearman_r(x, y) + 1.0) < 1e-9
+        r, p = _spearman_r(x, y)
+        assert abs(r + 1.0) < 1e-9
+        assert p == 0.0  # perfect anti-correlation
 
     @skip_analysis
     def test_short_returns_zero(self):
-        assert _spearman_r([1, 2], [3, 4]) == 0.0
+        r, p = _spearman_r([1, 2], [3, 4])
+        assert r == 0.0
 
     @skip_analysis
     def test_range_minus1_to_1(self):
@@ -323,8 +328,9 @@ class TestSpearmanR:
         rng = random.Random(42)
         x = [rng.random() for _ in range(50)]
         y = [rng.random() for _ in range(50)]
-        r = _spearman_r(x, y)
+        r, p = _spearman_r(x, y)
         assert -1.0 <= r <= 1.0
+        assert 0.0 <= p <= 1.0
 
 
 class TestKMeansGeo:

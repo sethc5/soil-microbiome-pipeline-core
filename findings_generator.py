@@ -12,7 +12,7 @@ Usage:
 from __future__ import annotations
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -59,7 +59,7 @@ def _render_findings_md(
     enriched_taxa: list,
     results_dir: Path,
 ) -> str:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
     target = config.get("target_function", "target function")
     project = config_path.stem

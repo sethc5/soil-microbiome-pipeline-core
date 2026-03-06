@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -84,7 +84,7 @@ def _load_top_interventions(db: SoilDB, top: int) -> list[dict]:
 
 
 def _render_markdown(config_path: Path, interventions: list[dict]) -> str:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     cfg = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
     target = cfg.get("target_function", "target function")
     project = config_path.stem

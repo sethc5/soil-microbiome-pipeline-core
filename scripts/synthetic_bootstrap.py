@@ -275,10 +275,9 @@ def _generate_one(seed: int, site_code: str, fraction: str) -> dict:
     }
 
 
-def _generate_batch(args: tuple) -> list[dict]:
+def _generate_batch(args: list[tuple]) -> list[dict]:
     """Worker: generate a batch of communities. Returns list of result dicts."""
-    seeds, site_code, fraction = args
-    return [_generate_one(seed, site_code, fraction) for seed in seeds]
+    return [_generate_one(seed, site_code, fraction) for seed, site_code, fraction in args]
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +527,7 @@ def main(
             yield lst[i:i + n]
 
     batched_args = [
-        ([s for s, _, _ in chunk], chunk[0][1], chunk[0][2])
+        ([(s, site, frac) for s, site, frac in chunk])
         for chunk in _chunks(jobs, batch_size)
     ]
 

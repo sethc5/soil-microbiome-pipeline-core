@@ -84,6 +84,21 @@ log "╚════════════════════════
 PIPELINE_START=$(date +%s)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Phase -1: Initialize DB (schema creation + WAL mode)
+# Creates all 8 tables if they don't exist. Idempotent.
+# ══════════════════════════════════════════════════════════════════════════════
+log "━━━ PHASE: Initialize Database ━━━"
+mkdir -p "$(dirname "$DB")"
+python -c "
+import sys; sys.path.insert(0, '.')
+from db_utils import SoilDB
+with SoilDB('$DB') as db:
+    tables = [r[0] for r in db.conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\").fetchall()]
+    print(f'Schema OK — tables: {tables}')
+" 2>&1 | tee -a "$MASTER_LOG"
+log "✓ Database initialized"
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Phase 0: Synthetic Bootstrap (T0 + T0.25)
 # Generate synthetic communities, train ML predictor, produce reference BIOM.
 # Already completed: 220K communities. Skippable.
@@ -172,7 +187,7 @@ run_phase "Intervention Screening" \
 run_phase "Analysis Pipeline" \
   python scripts/analysis_pipeline.py \
     --db "$DB" \
-    --results-dir results/
+    --out-dir results/
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 7: Generate Findings
@@ -201,6 +216,21 @@ if command -v python &>/dev/null; then
     run_phase "Intervention Report" \
       python intervention_report.py --db "$DB" --top 50
   fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 9: Validation (optional — requires reference data)
+# Runs known-community recovery test if reference files exist.
+# ══════════════════════════════════════════════════════════════════════════════
+if [[ -f reference/high_bnf_communities.biom ]] && [[ -f reference/bnf_measurements.csv ]]; then
+  run_phase "Validation (known community recovery)" \
+    python validate_pipeline.py \
+      --config config.example.yaml \
+      --reference-communities reference/high_bnf_communities.biom \
+      --measured-function reference/bnf_measurements.csv \
+      --db "$DB"
+else
+  log "⏭ Skipping validation (no reference data in reference/)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════

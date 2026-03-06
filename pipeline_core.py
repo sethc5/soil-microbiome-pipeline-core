@@ -1028,6 +1028,8 @@ def run(
         "Starting pipeline | tier=%s | %d samples | %d workers", tier, len(samples), workers
     )
 
+    summary: dict = {}
+
     with SoilDB(db_path) as db:
         if tier in ("0", "all"):
             summary = run_t0_batch(
@@ -1047,7 +1049,7 @@ def run(
                 workers=workers,
                 target_id=target_id,
                 receipts_dir=receipts_dir,
-                batch_run_label=summary.get("batch_run_label", "") if tier != "all" else "",
+                batch_run_label=summary.get("batch_run_label", ""),
             )
             typer.echo(json.dumps({"t025": t025_result}, indent=2))
 
