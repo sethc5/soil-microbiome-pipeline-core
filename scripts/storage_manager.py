@@ -45,7 +45,7 @@ def _dir_size_bytes(path: Path) -> int:
     """Recursively sum the size of all files under *path*."""
     total = 0
     for entry in path.rglob("*"):
-        if entry.is_file(follow_symlinks=False):
+        if entry.is_file() and not entry.is_symlink():  # 3.11-safe (no follow_symlinks kwarg)
             try:
                 total += entry.stat().st_size
             except OSError:
