@@ -1,0 +1,43 @@
+{
+  "name": "Soil Microbiome Pipeline",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": { "version": "latest" }
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false
+      },
+      "tasks": [
+        {
+          "label": "T0 test run (50 samples)",
+          "type": "shell",
+          "command": "python batch_runner.py --config config.example.yaml --tier 0 --limit 50",
+          "group": { "kind": "build", "isDefault": true },
+          "presentation": { "reveal": "always", "panel": "new" }
+        },
+        {
+          "label": "Run tests",
+          "type": "shell",
+          "command": "python -m pytest tests/ -q",
+          "group": "test",
+          "presentation": { "reveal": "always", "panel": "new" }
+        }
+      ]
+    }
+  },
+  "postCreateCommand": "python scripts/setup_codespace.py",
+  "shutdownAction": "none"
+}
