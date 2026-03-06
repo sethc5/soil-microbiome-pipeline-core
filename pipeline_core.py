@@ -93,7 +93,8 @@ def run_t0_batch(
     import time as _time
     batch_run_label = f"{target_id}_{int(_time.time())}"
 
-    t0_cfg = config.t0
+    from config_schema import T0Filters
+    t0_cfg = T0Filters(**config.filters.get("t0", {}))
 
     n_passed = 0
     n_failed = 0

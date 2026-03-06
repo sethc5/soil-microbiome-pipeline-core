@@ -17,27 +17,27 @@
         "GitHub.copilot-chat"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "python.terminal.activateEnvironment": false
+        "python.defaultInterpreterPath": "/workspaces/venv/bin/python",
+        "python.terminal.activateEnvironment": true
       },
       "tasks": [
         {
           "label": "T0 test run (50 samples)",
           "type": "shell",
-          "command": "python batch_runner.py --config config.example.yaml --tier 0 --limit 50",
+          "command": "/workspaces/venv/bin/python batch_runner.py --config config.example.yaml --tier 0 --limit 50",
           "group": { "kind": "build", "isDefault": true },
           "presentation": { "reveal": "always", "panel": "new" }
         },
         {
           "label": "Run tests",
           "type": "shell",
-          "command": "python -m pytest tests/ -q",
+          "command": "/workspaces/venv/bin/python -m pytest tests/ -q",
           "group": "test",
           "presentation": { "reveal": "always", "panel": "new" }
         }
       ]
     }
   },
-  "postCreateCommand": "python scripts/setup_codespace.py",
+  "postCreateCommand": "python3 scripts/setup_codespace.py",
   "shutdownAction": "none"
 }
