@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def _mann_whitney_u(group_a: list[float], group_b: list[float]) -> tuple[float, float]:
-    """Compute Mann-Whitney U statistic and approximate p-value (normal approx)."""
+    """Compute Mann-Whitney U statistic and approximate p-value (normal approx, tie-corrected)."""
     import statistics
     na, nb = len(group_a), len(group_b)
     if na == 0 or nb == 0:
@@ -37,13 +37,17 @@ def _mann_whitney_u(group_a: list[float], group_b: list[float]) -> tuple[float, 
 
     combined = sorted([(v, 0) for v in group_a] + [(v, 1) for v in group_b])
     ranks: list[float] = []
+    tie_term = 0  # sum of (t^3 - t) for each tie group
     i = 0
     while i < len(combined):
         j = i
         while j < len(combined) - 1 and combined[j][0] == combined[j + 1][0]:
             j += 1
         avg_rank = (i + j) / 2 + 1
-        for _ in range(j - i + 1):
+        t = j - i + 1  # group size
+        if t > 1:
+            tie_term += t ** 3 - t
+        for _ in range(t):
             ranks.append(avg_rank)
         i = j + 1
 
@@ -51,7 +55,11 @@ def _mann_whitney_u(group_a: list[float], group_b: list[float]) -> tuple[float, 
     u = rank_sum_a - na * (na + 1) / 2
     n = na + nb
     mean_u = na * nb / 2
-    std_u = math.sqrt(na * nb * (n + 1) / 12)
+    # Tie-corrected standard deviation (Hollander & Wolfe 1999)
+    numerator = na * nb * ((n ** 3 - n) - tie_term)
+    if numerator <= 0 or n <= 1:
+        return u, 1.0
+    std_u = math.sqrt(numerator / (12 * n * (n - 1)))
     if std_u == 0:
         return u, 1.0
     z = (u - mean_u) / std_u

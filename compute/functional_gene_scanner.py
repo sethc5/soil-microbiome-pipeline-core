@@ -107,10 +107,114 @@ SUPPORTED_GENES: dict[str, dict] = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Curated verified diazotroph lineages (HGT-aware nifH validation — Gap 7)
+# Source: Gaby & Buckley 2012 (Environ Microbiol); Dos Santos et al 2012 (BMC Genomics)
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+_VERIFIED_DIAZOTROPH_GENERA: frozenset[str] = frozenset({
+    # Free-living N-fixers (well-documented)
+    "Azotobacter", "Azoarcus", "Azospirillum", "Herbaspirillum", "Gluconacetobacter",
+    "Burkholderia", "Paenibacillus", "Bacillus", "Clostridium", "Desulfovibrio",
+    "Frankia",  # actinorhizal symbiont
+    # Cyanobacterial N-fixers
+    "Anabaena", "Nostoc", "Aphanizomenon", "Cylindrospermum", "Fischerella",
+    "Trichodesmium", "Cyanothece", "Calothrix",
+    # Rhizobial / legume symbionts
+    "Rhizobium", "Bradyrhizobium", "Sinorhizobium", "Mesorhizobium", "Azorhizobium",
+    "Cupriavidus", "Phyllobacterium",
+    # Methanotrophic / anoxygenic phototroph
+    "Rhodospirillum", "Rhodopseudomonas", "Rhodobacter", "Chlorobaculum",
+    # Diazotrophic sulfate reducers
+    "Desulfobacter", "Desulfosporosinus",
+})
+
+# Genera known to carry non-functional nifH via HGT without regulatory context
+_KNOWN_HGT_ONLY_GENERA: frozenset[str] = frozenset({
+    "Geodermatophilus",      # nifH present but no active N-fixation detected
+    "Methylobacterium",      # some strains have HGT-acquired nifH; verify
+    "Microcoleus",           # some strains non-functional
+    "Magnetospirillum",      # nifH present, functional status unclear
+})
+
+
+def validate_nifh_functional(
+    nifh_data: dict,
+    taxonomy: dict | None = None,
+) -> dict:
+    """
+    Post-process nifH hits to flag probable HGT-acquired non-functional copies.
+
+    Cross-references detected genera (from taxonomy dict or nifH hit annotation)
+    against a curated list of verified diazotroph lineages.
+
+    Parameters
+    ----------
+    nifh_data : dict
+        The nifH result dict from scan_functional_genes() for the 'nifH' gene.
+    taxonomy : dict | None
+        Community taxonomy dict (genus → relative_abundance). If provided,
+        checks which genera carrying nifH are verified diazotrophs.
+
+    Returns
+    -------
+    dict: updated nifH result dict with added keys:
+        functional_confidence        'high' | 'medium' | 'low'
+        verified_diazotroph_genera   list[str]  genera confirmed as diazotrophs
+        hgt_flagged                  bool       True if likely non-functional HGT
+        functional_note              str        human-readable explanation
+    """
+    result = dict(nifh_data)  # make a copy, don't mutate
+
+    if not result.get("present"):
+        return result
+
+    # If no taxonomy available, fall through to abundance heuristic only
+    if taxonomy:
+        genera_in_community = set(taxonomy.keys())
+        verified = genera_in_community & _VERIFIED_DIAZOTROPH_GENERA
+        hgt_only = genera_in_community & _KNOWN_HGT_ONLY_GENERA
+        non_diazotroph_burden = len(genera_in_community - _VERIFIED_DIAZOTROPH_GENERA - _KNOWN_HGT_ONLY_GENERA)
+
+        if verified:
+            confidence = "high"
+            hgt_flag = False
+            note = f"Verified diazotroph genera present: {sorted(verified)}"
+        elif hgt_only and not verified:
+            confidence = "low"
+            hgt_flag = True
+            note = (
+                f"nifH detected but only in HGT-known genera {sorted(hgt_only)} — "
+                "functional N-fixation unlikely. Cross-validate with acetylene reduction assay."
+            )
+        else:
+            # Presence in community but no verified genera — medium confidence
+            confidence = "medium"
+            hgt_flag = result.get("hgt_flagged", False)
+            note = (
+                "nifH detected; no verified diazotroph genera identified in taxonomy. "
+                "May reflect HGT-acquired copies or rare/unresolved diazotrophs."
+            )
+    else:
+        # Abundance-only heuristic (no taxonomy available)
+        abundance = result.get("abundance") or 0.0
+        if abundance >= 0.01:
+            confidence = "medium"
+            hgt_flag = False
+            note = "nifH detected at meaningful abundance; verify with taxonomy cross-reference."
+        else:
+            confidence = "low"
+            hgt_flag = True
+            note = (
+                f"nifH abundance {abundance:.2e} is below functional threshold (0.01). "
+                "Likely spurious or HGT-acquired."
+            )
+
+    result["functional_confidence"] = confidence
+    result["verified_diazotroph_genera"] = sorted(verified) if taxonomy else []
+    result["hgt_flagged"] = hgt_flag
+    result["functional_note"] = note
+    return result
 
 def scan_functional_genes(
     fasta_path: str | Path | None = None,

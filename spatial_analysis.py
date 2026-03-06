@@ -36,6 +36,26 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
+def _spherical_centroid(lats: list[float], lons: list[float]) -> tuple[float, float]:
+    """
+    Compute the geographic centroid of a set of lat/lon points using
+    spherical (3D Cartesian) averaging — accurate near poles and antimeridian.
+    """
+    xs, ys, zs = 0.0, 0.0, 0.0
+    for lat, lon in zip(lats, lons):
+        lat_r = math.radians(lat)
+        lon_r = math.radians(lon)
+        xs += math.cos(lat_r) * math.cos(lon_r)
+        ys += math.cos(lat_r) * math.sin(lon_r)
+        zs += math.sin(lat_r)
+    n = len(lats)
+    xs /= n; ys /= n; zs /= n
+    lon_c = math.degrees(math.atan2(ys, xs))
+    hyp   = math.sqrt(xs * xs + ys * ys)
+    lat_c = math.degrees(math.atan2(zs, hyp))
+    return lat_c, lon_c
+
+
 def _k_means_geo(points: list[tuple[float, float, int]], k: int, iterations: int = 20) -> list[int]:
     """Simple k-means clustering on (lat, lon) pairs. Returns cluster label per point."""
     import random
@@ -53,15 +73,16 @@ def _k_means_geo(points: list[tuple[float, float, int]], k: int, iterations: int
             dists = [_haversine_km(lat, lon, c[0], c[1]) for c in centroids]
             labels[i] = dists.index(min(dists))
 
-        # Update centroids
+        # Update centroids using spherical mean (accurate near poles/antimeridian)
         new_centroids = []
         for ki in range(k):
             cluster_pts = [coords[i] for i, l in enumerate(labels) if l == ki]
             if cluster_pts:
-                new_centroids.append((
-                    sum(p[0] for p in cluster_pts) / len(cluster_pts),
-                    sum(p[1] for p in cluster_pts) / len(cluster_pts),
-                ))
+                lat_c, lon_c = _spherical_centroid(
+                    [p[0] for p in cluster_pts],
+                    [p[1] for p in cluster_pts],
+                )
+                new_centroids.append((lat_c, lon_c))
             else:
                 new_centroids.append(centroids[ki])
         centroids = new_centroids
@@ -124,11 +145,12 @@ def analyze(
         fluxes = [m["t1_target_flux"] for m in members if m["t1_target_flux"]]
         lats = [m["latitude"] for m in members]
         lons = [m["longitude"] for m in members]
+        lat_c, lon_c = _spherical_centroid(lats, lons)
         cluster_summary.append({
             "cluster": cid,
             "n_communities": len(members),
-            "centroid_lat": sum(lats) / len(lats),
-            "centroid_lon": sum(lons) / len(lons),
+            "centroid_lat": round(lat_c, 4),
+            "centroid_lon": round(lon_c, 4),
             "mean_flux": sum(fluxes) / len(fluxes) if fluxes else 0,
             "max_flux": max(fluxes) if fluxes else 0,
         })

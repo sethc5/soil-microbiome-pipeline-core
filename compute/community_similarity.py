@@ -175,8 +175,11 @@ class CommunitySimilaritySearch:
             ])
         elif metric == "cosine":
             # cosine similarity → convert to distance
+            # Normalize ref rows explicitly for API consistency with braycurtis path
+            # (scipy.cdist cosine also normalises internally, but we do it here for clarity)
             from scipy.spatial.distance import cdist
-            dists_2d = cdist(q[np.newaxis, :], self._ref_matrix, metric="cosine")
+            ref_normed = np.apply_along_axis(_normalize, 1, self._ref_matrix)
+            dists_2d = cdist(q[np.newaxis, :], ref_normed, metric="cosine")
             dists = dists_2d[0]
         else:
             raise ValueError(f"Unsupported metric: {metric!r}. Use 'braycurtis' or 'cosine'.")

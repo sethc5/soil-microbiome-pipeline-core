@@ -210,7 +210,7 @@ def run_community_fba(
     # Extract target pathway flux
     target_rxns = _find_target_reactions(community, target_pathway)
     if target_rxns:
-        target_fluxes = [solution.fluxes.get(rxn.id, 0.0) for rxn in target_rxns]
+        target_fluxes = [abs(solution.fluxes.get(rxn.id, 0.0)) for rxn in target_rxns]
         target_flux = sum(target_fluxes) / len(target_fluxes)
     else:
         logger.warning("No reactions found for target_pathway=%r", target_pathway)

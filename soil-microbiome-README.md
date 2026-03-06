@@ -182,6 +182,11 @@ CREATE TABLE samples (
     sampling_season     TEXT,
     sampling_date       TEXT,
 
+    -- Extended spatial / visit tracking (Phase 8)
+    site_id             TEXT,               -- persistent site identifier across visits
+    visit_number        INTEGER,            -- sequential visit to the same site
+    sampling_fraction   REAL,               -- fraction of site area sampled (0–1)
+
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -209,6 +214,13 @@ CREATE TABLE communities (
     phylum_profile      TEXT,               -- JSON: phylum → relative abundance
     top_genera          TEXT,               -- JSON: top 50 genera by abundance
     otu_table_path      TEXT,               -- path to full OTU/ASV table file
+
+    -- Extended community metrics (Phase 8)
+    fungal_bacterial_ratio REAL,            -- ITS/16S ratio (requires paired sequencing)
+    has_amoa_bacterial  BOOLEAN,            -- bacterial amoA (Nitrosomonas/Nitrosospira)
+    has_amoa_archaeal   BOOLEAN,            -- archaeal amoA (Thaumarchaeota)
+    its_profile         TEXT,               -- JSON: fungal phylum → relative abundance
+    mrna_to_dna_ratio   REAL,               -- metatranscriptomic activity proxy
 
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -264,6 +276,12 @@ CREATE TABLE runs (
     t2_establishment_prob REAL,             -- probability inoculant establishes
     t2_off_target_impact TEXT,              -- JSON: effects on non-target functions
     t2_walltime_s       REAL,
+
+    -- Confidence propagation (Phase 8.4)
+    t1_model_confidence TEXT,               -- 'high'/'medium'/'low' from CheckM genome completeness
+    t1_flux_lower_bound REAL,               -- FVA lower bound on target flux
+    t1_flux_upper_bound REAL,               -- FVA upper bound on target flux
+    t2_confidence       TEXT,               -- propagated model_confidence from dFBA run
 
     tier_reached        INTEGER,
     run_date            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -387,7 +405,7 @@ filters:
   t1:
     fba_engine: "cobrapy"
     community_size_limit: 20              # max organisms in community FBA model
-    genome_db: "patric"                   # source for member genome annotations
+    genome_db: "bv-brc"                   # source for member genome annotations (BV-BRC, formerly PATRIC)
     min_target_flux: 0.5
     max_fba_walltime_min: 30
   t2:
@@ -470,7 +488,7 @@ compute/
 
 # T1 — metabolic network modeling
 compute/
-  genome_fetcher.py               — Fetch representative genomes from PATRIC/NCBI
+  genome_fetcher.py               — Fetch representative genomes from BV-BRC/NCBI
   genome_annotator.py             — Prokka annotation for novel genomes
   model_builder.py                — CarveMe / ModelSEED genome-scale model construction
   community_fba.py                — COBRApy community FBA, flux variability analysis
@@ -536,7 +554,7 @@ From the T0.25 community profile (OTU table + taxonomy), select representative o
 
 1. Filter to taxa with relative abundance > 0.1% (covers ~80-90% of community function)
 2. Apply functional guild constraints — ensure coverage of target functional guild (N fixers, C cyclers, etc.)
-3. For each representative taxon, fetch the best available reference genome from PATRIC or NCBI RefSeq
+3. For each representative taxon, fetch the best available reference genome from BV-BRC or NCBI RefSeq
 4. For taxa with no reference genome (common in soil — 40-60% of soil taxa are uncharacterized), use a phylogenetic neighbor genome as proxy
 
 ### Step 2: Genome-Scale Model Construction
@@ -767,6 +785,7 @@ python intervention_report.py --config config.yaml --top 20
 | Sequence alignment | `mmseqs2` | Fast homology for functional gene detection |
 | ML prediction | `scikit-learn` | RF/GBM for T0.25 functional prediction |
 | Genome annotation | `prokka` | Fast bacterial genome annotation |
+| Genome completeness | `checkm-genome` | Completeness/contamination for model confidence |
 | Metabolic models | `carveme` | Automated genome-scale model construction |
 | Community FBA | `cobrapy` | Community flux balance analysis |
 | dFBA dynamics | `cobra` + `scipy` | Dynamic FBA time-course simulation |
@@ -846,7 +865,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Highest value contributions:
 - [Earth Microbiome Project](https://earthmicrobiome.org/) — 97-country soil microbiome atlas
 - [EBI MGnify](https://www.ebi.ac.uk/metagenomics/) — 500,000+ processed metagenomes
 - [NCBI SRA](https://www.ncbi.nlm.nih.gov/sra) — sequence archive, millions of metagenomes
-- [PATRIC](https://www.patricbrc.org/) — bacterial genome database for model construction
+- [BV-BRC](https://www.bv-brc.org/) — bacterial genome database for model construction (formerly PATRIC)
 - [COBRApy](https://github.com/opencobra/cobrapy) — constraint-based metabolic modeling
 - [CarveMe](https://github.com/cdanielmachado/carveme) — automated genome-scale model reconstruction
 - [QIIME2](https://qiime2.org/) — amplicon microbiome analysis

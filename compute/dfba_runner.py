@@ -225,4 +225,6 @@ def run_dfba(
         "stability_score": stability_score,
         "perturbation_responses": perturbation_responses,
         "walltime_s": walltime_s,
+        # Propagate T1 model confidence to T2 output (Gap 9)
+        "model_confidence": getattr(community_model, "_model_confidence", None),
     }
