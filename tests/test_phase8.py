@@ -255,7 +255,6 @@ class TestDfbaConfidencePropagation:
 
     def test_run_dfba_returns_model_confidence_none_without_notes(self):
         """run_dfba should return model_confidence=None when model has no _model_confidence."""
-        import cobra  # type: ignore
         pytest.importorskip("cobra")
         from compute.dfba_runner import run_dfba
 
