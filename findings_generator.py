@@ -36,7 +36,7 @@ def _load_json_if_exists(path: Path) -> list | dict | None:
 def _db_summary(db: SoilDB) -> dict:
     with db._connect() as conn:
         n_total = conn.execute("SELECT COUNT(*) FROM communities").fetchone()[0]
-        n_passed = conn.execute("SELECT COUNT(*) FROM runs WHERE t0_passed=1").fetchone()[0]
+        n_passed = conn.execute("SELECT COUNT(*) FROM runs WHERE t0_pass=1").fetchone()[0]
         n_t1 = conn.execute("SELECT COUNT(*) FROM runs WHERE t1_target_flux IS NOT NULL").fetchone()[0]
         n_t2 = conn.execute("SELECT COUNT(*) FROM runs WHERE t2_stability_score IS NOT NULL").fetchone()[0]
         top_flux_row = conn.execute(
@@ -73,7 +73,7 @@ def _render_findings_md(
         f"- T0 passed: **{db_summary['n_passed_t0']}**",
         f"- T1 metabolic models built: **{db_summary['n_completed_t1']}**",
         f"- T2 dynamics simulated: **{db_summary['n_completed_t2']}**",
-        f"- Top {target} flux: **{db_summary['top_flux']:.4g}** (community {db_summary['top_community_id']})",
+        f"- Top {target} flux: **{db_summary['top_flux'] or 0.0:.4g}** (community {db_summary['top_community_id']})",
         "",
         "## Correlation Patterns",
     ]

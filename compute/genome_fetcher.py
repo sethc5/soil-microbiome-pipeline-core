@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # BV-BRC (formerly PATRIC) API
 BV_BRC_BASE = "https://www.bv-brc.org/api"
 # NCBI Entrez (no key needed for <3 requests/sec)
-NCBI_ENTREZ_BASE = "https://ebi.ncbi.nlm.nih.gov/entrez/eutils"
+NCBI_ENTREZ_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 # NCBI datasets FTP base
 NCBI_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/genomes/all"
 

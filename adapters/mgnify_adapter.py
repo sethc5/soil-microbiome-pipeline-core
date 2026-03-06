@@ -93,10 +93,11 @@ class MGnifyAdapter:
                     "collection_date": attrs.get("collection-date"),
                     "environment_material": attrs.get("environment-material"),
                     "study_id": (
+                        lambda d: d[0].get("id") if d else None
+                    )(
                         item.get("relationships", {})
                             .get("studies", {})
-                            .get("data", [{}])[0]
-                            .get("id")
+                            .get("data", [])
                     ),
                 }
                 yield meta

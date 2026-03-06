@@ -63,10 +63,17 @@ def rank(
     with database._connect() as conn:
         rows = conn.execute(
             """
-            SELECT r.*, c.sample_id, c.study_id, c.latitude, c.longitude,
-                   c.ph, c.temperature
+            SELECT r.run_id, r.community_id, r.run_date,
+                   r.t0_pass, r.t0_depth_ok,
+                   r.t025_model, r.t025_n_pathways, r.t025_nsti_mean,
+                   r.t1_target_flux, r.t1_model_confidence, r.t1_metabolic_exchanges,
+                   r.t2_stability_score, r.t2_resistance, r.t2_resilience,
+                   r.t2_functional_redundancy, r.t2_interventions,
+                   c.sample_id, s.site_id, s.latitude, s.longitude,
+                   s.soil_ph, s.temperature_c
             FROM runs r
-            JOIN communities c ON r.community_id = c.id
+            JOIN communities c ON r.community_id = c.community_id
+            JOIN samples s ON c.sample_id = s.sample_id
             WHERE r.t1_target_flux IS NOT NULL
             ORDER BY r.community_id
             """
@@ -77,12 +84,12 @@ def rank(
         raise typer.Exit(1)
 
     col_names = [
-        "run_id", "community_id", "created_at", "t0_passed", "t0_quality_flag",
+        "run_id", "community_id", "run_date", "t0_pass", "t0_depth_ok",
         "t025_model", "t025_n_pathways", "t025_nsti_mean",
         "t1_target_flux", "t1_model_confidence", "t1_metabolic_exchanges",
         "t2_stability_score", "t2_resistance", "t2_resilience",
         "t2_functional_redundancy", "t2_interventions",
-        "sample_id", "study_id", "latitude", "longitude", "ph", "temperature",
+        "sample_id", "site_id", "latitude", "longitude", "soil_ph", "temperature_c",
     ]
 
     records = []
@@ -108,7 +115,7 @@ def rank(
         "composite_score", "t1_target_flux", "t1_model_confidence",
         "t2_stability_score", "t2_resistance", "t2_resilience",
         "t2_functional_redundancy", "top_intervention",
-        "latitude", "longitude", "ph", "temperature",
+        "latitude", "longitude", "soil_ph", "temperature_c",
     ]
     with open(output, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")

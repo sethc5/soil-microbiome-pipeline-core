@@ -191,14 +191,14 @@ def run_dfba(
             biomass_trajectory[org].append(new_bm)
 
         # Scale exchange bounds by total biomass (Michaelis-Menten-like)
-        # Keep perturbation modifications, but scale by biomass
+        # Scale from ORIGINAL bounds each step to avoid cumulative runaway
         total_bm = sum(biomass.values())
         if total_bm > 1e-9:
             scale = min(total_bm / len(organism_ids), 5.0)  # cap at 5× to prevent runaway
             for rxn_id in list(current_bounds):
-                lo, hi = current_bounds[rxn_id]
-                if lo < 0:
-                    current_bounds[rxn_id] = (lo * scale, hi)
+                orig_lo, orig_hi = original_bounds.get(rxn_id, current_bounds[rxn_id])
+                if orig_lo < 0:
+                    current_bounds[rxn_id] = (orig_lo * scale, orig_hi)
 
     _restore_bounds(community_model, original_bounds)
 

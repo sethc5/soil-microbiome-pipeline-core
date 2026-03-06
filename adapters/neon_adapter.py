@@ -353,6 +353,8 @@ class NEONAdapter:
                     wait = 10 * (attempt + 1)
                     logger.warning("NEON: rate-limited, waiting %ds", wait)
                     time.sleep(wait)
+                    if attempt == 2:
+                        logger.error("NEON: rate-limited 3 times for %s — giving up", url)
                 else:
                     raise
             except requests.RequestException as exc:

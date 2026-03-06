@@ -149,11 +149,13 @@ def scan(
         raw_rows = conn.execute(
             """
             SELECT r.community_id, r.t1_target_flux, r.t2_stability_score,
-                   r.t2_interventions, c.ph, c.temperature, c.latitude, c.longitude,
-                   c.study_id, c.sample_id
+                   r.t2_interventions, s.soil_ph, s.temperature_c,
+                   s.latitude, s.longitude,
+                   s.site_id, c.sample_id
             FROM runs r
-            JOIN communities c ON r.community_id = c.id
-            WHERE r.t0_passed = 1
+            JOIN communities c ON r.community_id = c.community_id
+            JOIN samples s ON c.sample_id = s.sample_id
+            WHERE r.t0_pass = 1
             """
         ).fetchall()
 

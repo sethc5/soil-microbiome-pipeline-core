@@ -238,12 +238,17 @@ def _scan_community_data(
 
     for gene in target_genes:
         gene_info = SUPPORTED_GENES[gene]
+        lineage_filter = gene_info.get("lineage_filter")
         # Match by keyword against community_data keys
         total_abundance = 0.0
         hits = 0
         for kw in gene_info["keywords"]:
             for cd_key, val in cd_lower.items():
                 if kw.lower() in cd_key:
+                    # If lineage_filter defined, require lineage match in key
+                    if lineage_filter:
+                        if not any(lf.lower() in cd_key for lf in lineage_filter):
+                            continue
                     try:
                         total_abundance += float(val)
                         hits += 1
@@ -280,8 +285,14 @@ def _keyword_scan(results: dict, fasta_path: Path, target_genes: list[str]) -> N
                 total_seqs += 1
                 header_lower = line.lower()
                 for gene in target_genes:
-                    for kw in SUPPORTED_GENES[gene]["keywords"]:
+                    gene_info = SUPPORTED_GENES[gene]
+                    lineage_filter = gene_info.get("lineage_filter")
+                    for kw in gene_info["keywords"]:
                         if kw.lower() in header_lower:
+                            # If lineage_filter defined, require lineage in header
+                            if lineage_filter:
+                                if not any(lf.lower() in header_lower for lf in lineage_filter):
+                                    continue
                             gene_counts[gene] += 1
                             break
     except Exception as exc:

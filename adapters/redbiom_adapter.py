@@ -49,10 +49,12 @@ class RedbiomAdapter:
         if not self._redbiom_available():
             return None
         try:
+            import os as _os
+            env = {**_os.environ, "REDBIOM_HOST": self._server}
             result = subprocess.run(
                 ["redbiom", *args],
                 capture_output=True, text=True, timeout=timeout, check=True,
-                env={"REDBIOM_HOST": self._server},
+                env=env,
             )
             return result.stdout.strip()
         except subprocess.CalledProcessError as exc:
@@ -124,6 +126,8 @@ class RedbiomAdapter:
         ids_file.write_text("\n".join(sample_ids))
 
         try:
+            import os as _os
+            env = {**_os.environ, "REDBIOM_HOST": self._server}
             subprocess.run(
                 [
                     "redbiom", "fetch", "samples",
@@ -133,7 +137,7 @@ class RedbiomAdapter:
                     "--resolve-ambiguities=most-reads",
                 ],
                 check=True, timeout=600, capture_output=True, text=True,
-                env={"REDBIOM_HOST": self._server},
+                env=env,
             )
             logger.info("Redbiom BIOM saved to %s", out_biom)
             return str(out_biom)

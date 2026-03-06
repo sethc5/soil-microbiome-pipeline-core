@@ -179,7 +179,7 @@ class LocalBIOMAdapter:
                 "sample_id": sample_id,
                 "source": "local",
                 "fastq_r1": str(fq),
-                "fastq_r2": str(r2) if r2.exists() else None,
+                "fastq_r2": str(r2) if r2 is not None else None,
                 "ph": _safe_float(meta_attrs.get("ph")),
                 "temperature": _safe_float(meta_attrs.get("temperature")),
                 "latitude": _safe_float(meta_attrs.get("latitude")),

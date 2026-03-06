@@ -95,7 +95,7 @@ def identify_keystone_taxa(
 
     keystones = []
     for suffix in org_suffixes:
-        org_num = suffix.lstrip("_org").lstrip("_")
+        org_num = suffix.removeprefix("__org")
         org_rxn_ids = _org_reaction_ids(community_model, suffix)
 
         with community_model:  # ← context manager reverts all changes

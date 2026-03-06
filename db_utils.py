@@ -315,14 +315,41 @@ class SoilDB:
             raise RuntimeError("SoilDB not connected — use as context manager or call connect()")
         return self._conn
 
+    def _connect(self):
+        """Return a context-manager that yields the raw sqlite3.Connection.
+
+        Usage by analysis modules::
+            with db._connect() as conn:
+                rows = conn.execute("SELECT ...").fetchall()
+        """
+        import contextlib
+
+        if self._conn is None:
+            self.connect()
+
+        @contextlib.contextmanager
+        def _ctx():
+            yield self.conn
+
+        return _ctx()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    _SAFE_COL_RE = __import__("re").compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+    def _validate_col_names(self, names: list[str]) -> None:
+        """Reject column names that don't look like valid SQL identifiers."""
+        for name in names:
+            if not self._SAFE_COL_RE.match(name):
+                raise ValueError(f"Invalid column name: {name!r}")
 
     def _insert(self, table: str, record: dict, *, or_replace: bool = False) -> int:
         """INSERT (OR REPLACE) a dict into table. Returns lastrowid."""
         verb = "INSERT OR REPLACE" if or_replace else "INSERT"
         cols = list(record.keys())
+        self._validate_col_names(cols)
         placeholders = ", ".join("?" * len(cols))
         col_names = ", ".join(cols)
         values = [
@@ -338,7 +365,10 @@ class SoilDB:
 
     def _update(self, table: str, pk_col: str, pk_val: Any, updates: dict) -> None:
         """UPDATE table SET col=? WHERE pk_col=pk_val."""
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        cols = list(updates.keys())
+        self._validate_col_names(cols)
+        self._validate_col_names([pk_col])
+        set_clause = ", ".join(f"{k} = ?" for k in cols)
         values = [
             json.dumps(v) if isinstance(v, (dict, list)) else v
             for v in updates.values()
@@ -621,8 +651,22 @@ class SoilDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    _VALID_METADATA_COLS = {
+        "soil_ph", "soil_texture", "clay_pct", "sand_pct", "silt_pct",
+        "organic_matter_pct", "total_nitrogen_ppm", "available_p_ppm",
+        "climate_zone", "land_use", "country", "biome", "moisture_pct",
+        "temperature_c", "precipitation_mm", "sampling_season",
+        "sampling_fraction", "cec", "bulk_density", "sampling_depth_cm",
+        "latitude", "longitude",
+    }
+
     def metadata_correlation(self, target_id: str, metadata_col: str) -> list[dict]:
         """Return (metadata_value, mean_t025_score) for correlation analysis."""
+        if metadata_col not in self._VALID_METADATA_COLS:
+            raise ValueError(
+                f"Invalid metadata column: {metadata_col!r}. "
+                f"Allowed: {sorted(self._VALID_METADATA_COLS)}"
+            )
         rows = self.conn.execute(
             f"""SELECT s.{metadata_col}, AVG(r.t025_function_score) as mean_score,
                        COUNT(*) as n

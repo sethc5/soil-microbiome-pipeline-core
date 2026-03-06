@@ -97,8 +97,8 @@ def _check1_t0_pass_rate(db: SoilDB, measured: dict[str, float]) -> dict:
                 return 0.0
             placeholders = ",".join("?" * len(sample_ids))
             rows = conn.execute(
-                f"SELECT r.t0_passed FROM runs r "
-                f"JOIN communities c ON r.community_id = c.id "
+                f"SELECT r.t0_pass FROM runs r "
+                f"JOIN communities c ON r.community_id = c.community_id "
                 f"WHERE c.sample_id IN ({placeholders})",
                 list(sample_ids),
             ).fetchall()
@@ -124,7 +124,7 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
     with db._connect() as conn:
         rows = conn.execute(
             "SELECT c.sample_id, r.t025_nsti_mean, r.t025_n_pathways "
-            "FROM runs r JOIN communities c ON r.community_id = c.id "
+            "FROM runs r JOIN communities c ON r.community_id = c.community_id "
             "WHERE r.t025_n_pathways IS NOT NULL"
         ).fetchall()
 
@@ -161,7 +161,7 @@ def _check3_t1_flux_magnitude(db: SoilDB, measured: dict[str, float]) -> dict:
     with db._connect() as conn:
         rows = conn.execute(
             "SELECT c.sample_id, r.t1_target_flux FROM runs r "
-            "JOIN communities c ON r.community_id = c.id "
+            "JOIN communities c ON r.community_id = c.community_id "
             "WHERE r.t1_target_flux IS NOT NULL"
         ).fetchall()
 

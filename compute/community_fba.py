@@ -68,12 +68,10 @@ def _apply_environmental_constraints(model: Any, metadata: dict) -> None:
     # Typical exchange reaction IDs in BIGG/CarveMe models:
     env_exchanges = ["EX_o2_e", "EX_glc__D_e", "EX_nh4_e", "EX_pi_e", "EX_so4_e"]
     for rxn_id in env_exchanges:
-        rxn = model.reactions.get_by_id(rxn_id) if rxn_id in model.reactions else None
-        if rxn is None:
-            try:
-                rxn = model.reactions.get_by_id(rxn_id)
-            except KeyError:
-                continue
+        try:
+            rxn = model.reactions.get_by_id(rxn_id)
+        except KeyError:
+            continue
         if rxn.lower_bound < 0:
             rxn.lower_bound = rxn.lower_bound * mult
 
@@ -232,15 +230,16 @@ def run_community_fba(
         except Exception as exc:
             logger.debug("FVA failed: %s", exc)
 
-    # Per-member flux contributions
+    # Per-member flux contributions — look up suffixed reaction IDs in community solution
     member_fluxes: dict[str, float] = {}
-    for m in member_models:
+    for i, m in enumerate(member_models):
         if m is None:
             continue
         m_rxns = _find_target_reactions(m, target_pathway)
         if m_rxns:
+            suffix = f"__org{i}" if i > 0 else ""
             member_fluxes[m.id] = sum(
-                solution.fluxes.get(rxn.id, 0.0)
+                solution.fluxes.get(f"{rxn.id}{suffix}", 0.0)
                 for rxn in m_rxns
             )
 

@@ -83,8 +83,16 @@ class AGPAdapter:
                 lat_lon_str = row.get("lat_lon", "")
                 if lat_lon_str and " " in lat_lon_str:
                     parts = lat_lon_str.split()
-                    lat = _safe_float(parts[0])
-                    lon = _safe_float(parts[-1]) if len(parts) > 1 else None
+                    if len(parts) == 4:  # e.g. "51.5074 N 0.1278 W"
+                        lat = _safe_float(parts[0])
+                        lon = _safe_float(parts[2])
+                        if lat is not None and parts[1].upper() == "S":
+                            lat = -lat
+                        if lon is not None and parts[3].upper() == "W":
+                            lon = -lon
+                    elif len(parts) >= 2:
+                        lat = _safe_float(parts[0])
+                        lon = _safe_float(parts[1])
 
                 yield {
                     "sample_id": row.get("sample_accession", ""),

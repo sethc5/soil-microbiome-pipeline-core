@@ -72,11 +72,10 @@ _GENUS_FUNCTION_LOOKUP: dict[str, list[str]] = {
     "Nitrosopumilus":      ["nitrification"],
     "Nitrososphaera":      ["nitrification"],
     # Denitrification
-    "Pseudomonas":         ["denitrification", "aromatic_degradation"],
+    "Pseudomonas":         ["phosphate_solubilization", "denitrification", "aromatic_degradation"],
     "Paracoccus":          ["denitrification"],
     "Thauera":             ["denitrification", "aromatic_degradation"],
     "Dechloromonas":       ["denitrification"],
-    "Thiobacillus":        ["denitrification", "sulfur_oxidation"],
     "Rhodanobacter":       ["denitrification"],
     # Anammox
     "Brocadia":            ["anammox"],
@@ -133,7 +132,6 @@ _GENUS_FUNCTION_LOOKUP: dict[str, list[str]] = {
     "Bacillus":            ["phosphate_solubilization"],
     "Penicillium":         ["phosphate_solubilization"],
     "Aspergillus":         ["phosphate_solubilization"],
-    "Pseudomonas":         ["phosphate_solubilization", "denitrification", "aromatic_degradation"],
     "Enterobacter":        ["phosphate_solubilization"],
     # Mycorrhizal
     "Glomus":              ["mycorrhizal"],

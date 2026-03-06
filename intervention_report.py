@@ -33,9 +33,10 @@ def _load_top_interventions(db: SoilDB, top: int) -> list[dict]:
         rows = conn.execute(
             """
             SELECT r.t2_interventions, r.t2_stability_score, r.t1_target_flux,
-                   c.ph, c.temperature, c.latitude, c.longitude, c.study_id
+                   s.soil_ph, s.temperature_c, s.latitude, s.longitude, s.site_id
             FROM runs r
-            JOIN communities c ON r.community_id = c.id
+            JOIN communities c ON r.community_id = c.community_id
+            JOIN samples s ON c.sample_id = s.sample_id
             WHERE r.t2_interventions IS NOT NULL
             ORDER BY r.t1_target_flux DESC
             """,

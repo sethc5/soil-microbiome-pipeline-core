@@ -137,6 +137,10 @@ class NCBISRAAdapter:
         Requires: sra-tools (prefetch + fasterq-dump) in PATH.
         Install via: conda install -c bioconda sra-tools
         """
+        import re as _re
+        if not _re.match(r'^[A-Z]{1,3}\d{5,}$', accession):
+            raise ValueError(f"Invalid SRA accession format: {accession!r}")
+
         outdir_path = Path(outdir)
         outdir_path.mkdir(parents=True, exist_ok=True)
 

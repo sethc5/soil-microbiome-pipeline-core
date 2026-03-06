@@ -85,12 +85,14 @@ def analyze(
         rows = conn.execute(
             """
             SELECT r.community_id, r.t1_target_flux, r.t2_stability_score,
-                   c.latitude, c.longitude, c.ph, c.study_id, c.sample_id
+                   s.latitude, s.longitude, s.soil_ph,
+                   s.site_id, c.sample_id
             FROM runs r
-            JOIN communities c ON r.community_id = c.id
+            JOIN communities c ON r.community_id = c.community_id
+            JOIN samples s ON c.sample_id = s.sample_id
             WHERE r.t1_target_flux IS NOT NULL
-              AND c.latitude IS NOT NULL
-              AND c.longitude IS NOT NULL
+              AND s.latitude IS NOT NULL
+              AND s.longitude IS NOT NULL
             ORDER BY r.t1_target_flux DESC
             LIMIT ?
             """,
@@ -102,7 +104,7 @@ def analyze(
         raise typer.Exit(1)
 
     col = ["community_id", "t1_target_flux", "t2_stability_score",
-           "latitude", "longitude", "ph", "study_id", "sample_id"]
+           "latitude", "longitude", "soil_ph", "study_id", "sample_id"]
     records = [dict(zip(col, r)) for r in rows]
 
     # Cluster
