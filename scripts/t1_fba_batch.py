@@ -325,12 +325,16 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
     except ImportError as exc:
         return [{"community_id": t[0], "error": f"Import failed: {exc}"} for t in batch]
 
-    # Detect best available LP solver once per worker
+    # Detect best available LP solver once per worker.
+    # We test against COBRApy's registered solvers, NOT just whether highspy
+    # is importable — optlang may not have the highs_interface even if highspy
+    # is installed, which causes model.solver = "highs" to raise ValueError.
     _SOLVER = "glpk"
     try:
-        import highspy  # noqa: F401
-        _SOLVER = "highs"
-    except ImportError:
+        import cobra.util.solver as _cs
+        if "highs" in _cs.solvers:
+            _SOLVER = "highs"
+    except Exception:
         pass
 
     # Suppress libsbml/cobra parse noise (EX_* exchange reaction warnings)
