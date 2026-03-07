@@ -335,8 +335,8 @@ def main(
         logger.info("Cleared %d old findings", existing)
 
     n = _insert_findings(conn, all_findings)
-    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore after commit (can't change inside tx)
     conn.close()
     logger.info("Inserted %d findings into DB", n)
 

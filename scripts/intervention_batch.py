@@ -219,8 +219,8 @@ def _write_interventions(db_path: str, results: list[dict]) -> tuple[int, int]:
             except Exception as exc:
                 logger.debug("Run update failed for run_id=%s: %s", run_id, exc)
 
-    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore after commit (can't change inside tx)
     conn.close()
     return n_interventions, n_runs
 

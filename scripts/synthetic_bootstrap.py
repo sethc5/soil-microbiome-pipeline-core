@@ -338,8 +338,8 @@ def _insert_batch(db_path: str, communities: list[dict]) -> int:
                 inserted += 1
             except Exception as exc:
                 logger.debug("Insert failed for %s: %s", c["sample_id"], exc)
-        conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
         conn.commit()
+        conn.execute("PRAGMA synchronous=NORMAL")  # restore after commit (can't change inside tx)
     finally:
         conn.close()
     return inserted

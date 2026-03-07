@@ -305,8 +305,8 @@ def _write_results(db_path: str, results: list[dict]) -> int:
             n += 1
         except Exception as exc:
             logger.debug("Write error cid=%s scen=%s: %s", r.get("community_id"), r.get("scenario_name"), exc)
-    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore after commit (can't change inside tx)
     conn.close()
     return n
 
