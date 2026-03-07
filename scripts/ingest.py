@@ -46,7 +46,7 @@ if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
 from config_schema import PipelineConfig
-from db_utils import SoilDB
+from db_utils import SoilDB, _db_connect
 from pipeline_core import run_t0_batch, run_t025_batch
 
 logger = logging.getLogger(__name__)
@@ -479,7 +479,7 @@ def status(
     if not db_path.exists():
         typer.echo(f"DB not found: {db_path}")
         raise typer.Exit(1)
-    con = sqlite3.connect(str(db_path))
+    con = _db_connect(db_path)
     out = {"db_path": str(db_path), "db_size_mb": round(os.path.getsize(db_path) / 1e6, 2)}
     for table in ["samples", "communities", "runs"]:
         try:

@@ -47,6 +47,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Batch dFBA ODE simulations for top BNF communities", add_completion=False, invoke_without_command=True)
 
@@ -314,7 +316,7 @@ def _worker_batch(batch: list[tuple]) -> list[dict]:
 
 def _fetch_communities(db_path: str, min_bnf: float, n_max: int) -> list[tuple]:
     """Load communities from DB for dFBA. Returns list of (cid, profile, env, sim_days)."""
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     rows = conn.execute(
         """SELECT c.community_id, c.phylum_profile,
                   json_object(
@@ -340,8 +342,8 @@ def _fetch_communities(db_path: str, min_bnf: float, n_max: int) -> list[tuple]:
 
 def _write_results(db_path: str, results: list[dict]) -> int:
     """Write dFBA T2 results back to the DB. Returns number written."""
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # write path
     n = 0
     for r in results:
         if r.get("error"):
@@ -364,6 +366,7 @@ def _write_results(db_path: str, results: list[dict]) -> int:
             n += 1
         except Exception as exc:
             logger.debug("Write failed for cid=%s: %s", r.get("community_id"), exc)
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
     conn.close()
     return n

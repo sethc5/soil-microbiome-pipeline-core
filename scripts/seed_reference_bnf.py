@@ -32,6 +32,8 @@ import typer
 _PROJ_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 app = typer.Typer(add_completion=False)
 
 # Published site-archetype medians (nmol N2 h⁻¹ g⁻¹ DW), from:
@@ -66,7 +68,7 @@ def seed(
 ):
     """Generate reference BNF measurements and stub BIOM from pipeline DB."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db), timeout=30)
+    conn = _db_connect(db, timeout=30)
 
     # Prefer t025_function_score (available after bootstrap); fall back to t1_target_flux
     rows = conn.execute(

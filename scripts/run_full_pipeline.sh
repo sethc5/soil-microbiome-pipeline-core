@@ -115,6 +115,10 @@ else
   log "⏭ Skipping ingest (--skip-ingest set)"
 fi
 
+# Update query-planner statistics so subsequent phases use accurate index costs.
+log "Running ANALYZE to refresh query planner statistics …"
+sqlite3 "$DB" "ANALYZE;" && log "✓ ANALYZE complete" || log "⚠  ANALYZE failed (non-fatal)"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 0: Synthetic Bootstrap (T0 + T0.25)
 # Generate synthetic communities, train ML predictor, produce reference BIOM.

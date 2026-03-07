@@ -52,6 +52,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Climate scenario BNF sensitivity analysis", add_completion=False, invoke_without_command=True)
 
@@ -249,8 +251,7 @@ CREATE INDEX IF NOT EXISTS idx_cp_flux      ON climate_projections(target_flux);
 
 
 def _ensure_schema(db_path: str) -> None:
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
     conn.executescript(_SCHEMA_SQL)
     conn.commit()
     conn.close()
@@ -258,8 +259,7 @@ def _ensure_schema(db_path: str) -> None:
 
 def _fetch_communities(db_path: str, n_max: int) -> list[tuple]:
     """Load T2-passed communities not yet in climate_projections for all 5 scenarios."""
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
     # Communities that have < 5 scenarios already recorded
     rows = conn.execute(
         """SELECT c.community_id, c.phylum_profile,
@@ -286,8 +286,8 @@ def _fetch_communities(db_path: str, n_max: int) -> list[tuple]:
 
 
 def _write_results(db_path: str, results: list[dict]) -> int:
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # write path
     n = 0
     for r in results:
         if r.get("error"):
@@ -305,6 +305,7 @@ def _write_results(db_path: str, results: list[dict]) -> int:
             n += 1
         except Exception as exc:
             logger.debug("Write error cid=%s scen=%s: %s", r.get("community_id"), r.get("scenario_name"), exc)
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
     conn.close()
     return n

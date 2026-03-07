@@ -32,6 +32,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Populate targets, taxa, and receipts tables", add_completion=False, invoke_without_command=True)
 
@@ -326,8 +328,8 @@ def main(
     logger.info("=== populate_tables starting ===")
     t_start = time.time()
 
-    conn = sqlite3.connect(str(db_path), timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(str(db_path), timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # write-heavy; WAL ensures durability
 
     # Phase 12
     logger.info("── Phase 12: targets ──")

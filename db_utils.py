@@ -181,8 +181,12 @@ CREATE TABLE IF NOT EXISTS runs (
     machine_id          TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_runs_target ON runs(target_id);
-CREATE INDEX IF NOT EXISTS idx_runs_tier ON runs(tier_reached, target_id);
+CREATE INDEX IF NOT EXISTS idx_runs_target    ON runs(target_id);
+CREATE INDEX IF NOT EXISTS idx_runs_tier      ON runs(tier_reached, target_id);
+CREATE INDEX IF NOT EXISTS idx_runs_t1        ON runs(t1_pass, t1_target_flux DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_t2        ON runs(t2_pass, t2_stability_score DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_t025      ON runs(t025_pass, t025_function_score DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_community ON runs(community_id);
 
 CREATE TABLE IF NOT EXISTS interventions (
     intervention_id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,6 +269,27 @@ MIGRATION_SQL: list[tuple[str, str]] = [
     ("runs",         "t2_functional_redundancy REAL"),
     ("runs",         "t2_interventions TEXT"),
 ]
+
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper — use instead of bare sqlite3.connect()
+# ---------------------------------------------------------------------------
+
+
+def _db_connect(db_path: str | Path, timeout: int = 30) -> sqlite3.Connection:
+    """Open a raw sqlite3 connection with all pipeline performance PRAGMAs applied.
+
+    Use this everywhere instead of bare ``sqlite3.connect()`` to ensure
+    consistent WAL mode, 512 MB page cache, mmap, and temp_store settings.
+    """
+    conn = sqlite3.connect(str(db_path), timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA cache_size=-524288")   # 512 MB page cache
+    conn.execute("PRAGMA temp_store=MEMORY")    # temp tables in RAM
+    conn.execute("PRAGMA mmap_size=536870912")  # 512 MB memory-mapped I/O
+    return conn
 
 
 # ---------------------------------------------------------------------------

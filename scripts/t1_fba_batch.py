@@ -45,6 +45,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(
     help="T1 metabolic-modelling batch: CarveMe + community FBA",
@@ -475,7 +477,7 @@ def _fetch_communities(db_path: str, n_max: int) -> list[tuple]:
     Returns list of (community_id, top_genera_json, metadata_json).
     Sorted by t2_stability_score * t025_function_score descending.
     """
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     rows = conn.execute(
         """SELECT c.community_id, c.top_genera,
                   json_object(
@@ -501,8 +503,7 @@ def _fetch_communities(db_path: str, n_max: int) -> list[tuple]:
 
 def _write_results(db_path: str, results: list[dict]) -> tuple[int, int]:
     """Write T1 FBA results back to runs table. Returns (n_written, n_passed)."""
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
     # synchronous=OFF: ~3-5x faster bulk writes. WAL mode ensures atomicity —
     # on crash the incomplete transaction is rolled back cleanly on next open.
     conn.execute("PRAGMA synchronous=OFF")

@@ -45,6 +45,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Generate synthetic communities and train FunctionalPredictor", add_completion=False, invoke_without_command=True)
 
@@ -286,9 +288,8 @@ def _generate_batch(args: list[tuple]) -> list[dict]:
 
 def _insert_batch(db_path: str, communities: list[dict]) -> int:
     """Insert a batch of synthetic communities into the DB. Returns n inserted."""
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn = _db_connect(db_path, timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # write path; restored before commit
     inserted = 0
     try:
         for c in communities:
@@ -337,6 +338,7 @@ def _insert_batch(db_path: str, communities: list[dict]) -> int:
                 inserted += 1
             except Exception as exc:
                 logger.debug("Insert failed for %s: %s", c["sample_id"], exc)
+        conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
         conn.commit()
     finally:
         conn.close()
@@ -352,7 +354,7 @@ def _train_predictor(db_path: str, model_out: Path, n_max: int = 80_000) -> None
     from compute.functional_predictor import FunctionalPredictor, clr_transform
 
     logger.info("Loading training data from DB …")
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     rows = conn.execute(
         """SELECT c.phylum_profile, s.soil_ph, s.organic_matter_pct,
                   s.clay_pct, s.temperature_c, s.precipitation_mm,
@@ -430,7 +432,7 @@ def _build_reference_biom(db_path: str, biom_out: Path, min_bnf: float = 0.65,
     A paired JSON sidecar (<biom_out>.meta.json) stores bnf_scores per column.
     """
     logger.info("Building reference OTU TSV (min_bnf=%.2f) …", min_bnf)
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     rows = conn.execute(
         """SELECT r.community_id, c.phylum_profile, r.t025_function_score
            FROM runs r

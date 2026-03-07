@@ -29,6 +29,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(
     help="Populate findings table from analysis pipeline outputs",
@@ -213,7 +215,7 @@ def _extract_rank_findings(results_dir: Path) -> list[dict]:
 
 def _extract_summary_finding(db_path: str) -> dict:
     """Generate a pipeline summary finding."""
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     n_total = conn.execute("SELECT COUNT(*) FROM communities").fetchone()[0]
     n_t0 = conn.execute("SELECT COUNT(*) FROM runs WHERE t0_pass = 1").fetchone()[0]
     n_t1 = conn.execute("SELECT COUNT(*) FROM runs WHERE t1_pass = 1").fetchone()[0]
@@ -323,8 +325,8 @@ def main(
     logger.info("Top-candidate findings: %d", len(rank))
 
     # Write to DB
-    conn = sqlite3.connect(str(db_path), timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(str(db_path), timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # write path; restored before commit
 
     # Clear old findings and repopulate
     existing = conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
@@ -333,6 +335,7 @@ def main(
         logger.info("Cleared %d old findings", existing)
 
     n = _insert_findings(conn, all_findings)
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
     conn.close()
     logger.info("Inserted %d findings into DB", n)

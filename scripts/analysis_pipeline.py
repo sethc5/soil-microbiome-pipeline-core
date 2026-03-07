@@ -39,6 +39,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Post-simulation analysis pipeline", add_completion=False, invoke_without_command=True)
 
@@ -170,7 +172,7 @@ def _kmeans_geo(points: list[tuple[float, float]], k: int, iters: int = 25) -> l
 def _load_t2_communities(db_path: str) -> list[dict]:
     """Load all T2-passed communities with flux, stability, env, phylum profile."""
     t0 = time.perf_counter()
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = _db_connect(db_path, timeout=60)
     rows = conn.execute(
         """SELECT
              c.community_id,
@@ -214,7 +216,7 @@ def _load_t2_communities(db_path: str) -> list[dict]:
 
 def _load_climate_projections(db_path: str) -> dict[int, list[dict]]:
     """Load climate_projections table; return dict community_id → [scenario_rows]."""
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = _db_connect(db_path, timeout=60)
     try:
         rows = conn.execute(
             """SELECT community_id, scenario_id, scenario_name,

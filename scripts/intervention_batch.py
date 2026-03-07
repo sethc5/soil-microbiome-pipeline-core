@@ -32,6 +32,8 @@ _PROJ_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
+from db_utils import _db_connect  # noqa: E402
+
 logger = logging.getLogger(__name__)
 app = typer.Typer(
     help="Batch intervention screening for T1-passed communities",
@@ -118,7 +120,7 @@ def _fetch_t1_communities(db_path: str, n_max: int) -> list[tuple]:
 
     Returns list of (run_id, community_id, metadata_json, t1_model_confidence).
     """
-    conn = sqlite3.connect(db_path)
+    conn = _db_connect(db_path)
     rows = conn.execute(
         """SELECT r.run_id, r.community_id,
                   json_object(
@@ -154,8 +156,8 @@ def _write_interventions(db_path: str, results: list[dict]) -> tuple[int, int]:
 
     Returns (n_interventions_written, n_runs_updated).
     """
-    conn = sqlite3.connect(db_path, timeout=60)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = _db_connect(db_path, timeout=60)
+    conn.execute("PRAGMA synchronous=OFF")  # safe in WAL; restore before commit
     n_interventions, n_runs = 0, 0
 
     for r in results:
@@ -217,6 +219,7 @@ def _write_interventions(db_path: str, results: list[dict]) -> tuple[int, int]:
             except Exception as exc:
                 logger.debug("Run update failed for run_id=%s: %s", run_id, exc)
 
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default
     conn.commit()
     conn.close()
     return n_interventions, n_runs
