@@ -8,11 +8,11 @@ Two-phase design:
     * Run ``carve --solver scip --gapfill M9`` to reconstruct draft models
     * Cache all models as SBML files on disk
 
-  Phase B — Community-level FBA + keystone (COBRApy + GLPK solver)
+  Phase B — Community-level FBA + keystone (COBRApy + HiGHS/GLPK solver)
     * For each T2-passed community, assemble community model from cached
-      genus-level SBML models
+      genus-level SBML models (SBML files cached per-worker to avoid re-parse)
     * Run FBA + FVA for nifH_pathway target flux
-    * Sequential single-knockout keystone-taxa identification
+    * Sequential single-knockout keystone-taxa identification (T1-pass only)
     * Write T1 results (t1_pass, t1_target_flux, …) to ``runs`` table
 
 Usage:
@@ -90,6 +90,28 @@ _GENUS_NCBI: dict[str, dict[str, str]] = {
 
 BV_BRC_BASE = "https://www.bv-brc.org/api"
 _REQ_DELAY = 0.35  # seconds between API calls (rate limiting)
+
+
+# ---------------------------------------------------------------------------
+# Per-worker SBML model cache
+# Populated once per child process on first access; deepcopy'd before use
+# so COBRApy can mutate freely without corrupting the cache.
+# ---------------------------------------------------------------------------
+
+_MODEL_CACHE: dict[str, Any] = {}
+
+
+def _load_genus_model(sbml_path: str) -> Any:
+    """Load an SBML model, caching it for the lifetime of this worker process.
+
+    Returns a deep copy ready for COBRApy mutation.
+    """
+    import copy
+    import cobra  # imported here so cache works in both main and worker
+
+    if sbml_path not in _MODEL_CACHE:
+        _MODEL_CACHE[sbml_path] = cobra.io.read_sbml_model(sbml_path)
+    return copy.deepcopy(_MODEL_CACHE[sbml_path])
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +323,19 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
     except ImportError as exc:
         return [{"community_id": t[0], "error": f"Import failed: {exc}"} for t in batch]
 
+    # Detect best available LP solver once per worker
+    _SOLVER = "glpk"
+    try:
+        import highspy  # noqa: F401
+        _SOLVER = "highs"
+    except ImportError:
+        pass
+
+    # Suppress libsbml/cobra parse noise (EX_* exchange reaction warnings)
+    logging.getLogger("cobra.io.sbml").setLevel(logging.ERROR)
+    logging.getLogger("libsbml").setLevel(logging.ERROR)
+    logging.getLogger("cobra.core.model").setLevel(logging.ERROR)
+
     model_dir_p = Path(model_dir)
     results = []
 
@@ -324,8 +359,8 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 if not sbml.exists():
                     continue
                 try:
-                    m = cobra.io.read_sbml_model(str(sbml))
-                    m.solver = "glpk"
+                    m = _load_genus_model(str(sbml))
+                    m.solver = _SOLVER
                     m.id = gname
                     member_models.append(m)
                 except Exception as exc:
@@ -351,7 +386,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 })
                 continue
 
-            community.solver = "glpk"
+            community.solver = _SOLVER
             _apply_environmental_constraints(community, metadata)
 
             # FBA
@@ -365,9 +400,12 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             else:
                 target_flux = 0.0
 
-            # FVA
+            # Early T1 pass/fail — skip FVA + keystone on non-passing communities
+            t1_pass = feasible and target_flux > 0.001
+
+            # FVA (only for T1-passing communities)
             fva_min, fva_max = 0.0, 0.0
-            if feasible and target_rxns:
+            if t1_pass and target_rxns:
                 try:
                     fva_result = cobra.flux_analysis.flux_variability_analysis(
                         community, reaction_list=target_rxns, fraction_of_optimum=0.9,
@@ -377,9 +415,9 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 except Exception:
                     pass
 
-            # Keystone analysis
+            # Keystone analysis (only for T1-passing communities)
             keystone_taxa = []
-            if feasible and target_flux > 1e-6:
+            if t1_pass and target_flux > 1e-6:
                 target_rxn_ids = [rxn.id for rxn in target_rxns]
                 keystone_taxa = identify_keystone_taxa(
                     community, target_flux,
@@ -397,8 +435,6 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 confidence_label = "medium"
             else:
                 confidence_label = "low"
-
-            t1_pass = feasible and target_flux > 0.001
 
             results.append({
                 "community_id": community_id,
