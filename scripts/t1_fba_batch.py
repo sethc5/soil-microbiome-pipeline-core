@@ -478,6 +478,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             })
 
         except Exception as exc:
+            logger.warning("Community %s FBA error: %s", community_id, exc, exc_info=True)
             results.append({
                 "community_id": community_id,
                 "t1_pass": False,
