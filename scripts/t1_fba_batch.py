@@ -424,11 +424,15 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             t1_pass = feasible and target_flux > 1e-3
 
             # FVA (only for T1-passing communities)
+            # processes=1: we are already parallelised at the batch level via
+            # ProcessPoolExecutor; letting COBRApy's FVA spawn its own pool
+            # (default = cpu_count = 72) inside each worker causes a fork bomb.
             fva_min, fva_max = 0.0, 0.0
             if t1_pass and target_rxns:
                 try:
                     fva_result = cobra.flux_analysis.flux_variability_analysis(
-                        community, reaction_list=target_rxns, fraction_of_optimum=0.9,
+                        community, reaction_list=target_rxns,
+                        fraction_of_optimum=0.9, processes=1,
                     )
                     fva_min = float(fva_result["minimum"].mean())
                     fva_max = float(fva_result["maximum"].mean())
