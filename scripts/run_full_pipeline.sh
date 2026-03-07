@@ -209,32 +209,41 @@ run_phase "Intervention Screening" \
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 6: Analysis Pipeline
-# Delegates to canonical standalone modules then collects climate resilience.
+# The 4 standalone analysis modules are independent (read-only on DB and
+# write separate output files) — run them in parallel, then continue.
 # ══════════════════════════════════════════════════════════════════════════════
-run_phase "Correlation Scan" \
-  python correlation_scanner.py scan \
-    --db "$DB" \
-    --config config.example.yaml \
-    --output results/correlation_findings.json
+log "━━━ PHASE: Analysis Pipeline (4 modules in parallel) ━━━"
+mkdir -p results/spatial
 
-run_phase "Rank Candidates" \
-  python rank_candidates.py rank \
-    --db "$DB" \
-    --config config.example.yaml \
-    --output results/ranked_candidates.csv \
-    --top 1000
+python correlation_scanner.py scan \
+  --db "$DB" --config config.example.yaml \
+  --output results/correlation_findings.json \
+  2>&1 | tee -a "$MASTER_LOG" &
+_PID_CORR=$!
 
-run_phase "Spatial Analysis" \
-  python spatial_analysis.py analyze \
-    --db "$DB" \
-    --output-dir results/spatial/ \
-    --top 1000 \
-    --n-clusters 20
+python rank_candidates.py rank \
+  --db "$DB" --config config.example.yaml \
+  --output results/ranked_candidates.csv --top 1000 \
+  2>&1 | tee -a "$MASTER_LOG" &
+_PID_RANK=$!
 
-run_phase "Taxa Enrichment" \
-  python taxa_enrichment.py enrich \
-    --db "$DB" \
-    --output results/taxa_enrichment.csv
+python spatial_analysis.py analyze \
+  --db "$DB" --output-dir results/spatial/ \
+  --top 1000 --n-clusters 20 \
+  2>&1 | tee -a "$MASTER_LOG" &
+_PID_SPAT=$!
+
+python taxa_enrichment.py enrich \
+  --db "$DB" --output results/taxa_enrichment.csv \
+  2>&1 | tee -a "$MASTER_LOG" &
+_PID_ENRICH=$!
+
+log "Waiting for parallel analysis modules (pids: $_PID_CORR $_PID_RANK $_PID_SPAT $_PID_ENRICH)..."
+wait $_PID_CORR  && log "✓ Correlation scan complete"    || log "✗ Correlation scan FAILED"
+wait $_PID_RANK  && log "✓ Rank candidates complete"     || log "✗ Rank candidates FAILED"
+wait $_PID_SPAT  && log "✓ Spatial analysis complete"    || log "✗ Spatial analysis FAILED"
+wait $_PID_ENRICH && log "✓ Taxa enrichment complete"    || log "✗ Taxa enrichment FAILED"
+log "✓ Analysis Pipeline parallel phase complete"
 
 # Climate resilience + master summary (not covered by standalone modules)
 run_phase "Climate Resilience + Summary" \

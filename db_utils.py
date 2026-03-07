@@ -288,6 +288,10 @@ class SoilDB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Performance tuning — safe on server with 251 GB RAM
+        self._conn.execute("PRAGMA cache_size=-524288")   # 512 MB page cache
+        self._conn.execute("PRAGMA temp_store=MEMORY")    # temp tables in RAM
+        self._conn.execute("PRAGMA mmap_size=536870912")  # 512 MB memory-mapped I/O
         self._conn.executescript(SCHEMA_SQL)
         self._apply_migrations()
         self._conn.commit()

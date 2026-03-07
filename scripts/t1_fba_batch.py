@@ -572,7 +572,7 @@ def main(
     db_path:       Path          = typer.Option(Path("/data/pipeline/db/soil_microbiome.db"), "--db"),
     n_communities: int           = typer.Option(5000, "--n-communities", "-n"),
     workers:       int           = typer.Option(36,   "--workers", "-w"),
-    batch_size:    int           = typer.Option(10,   "--batch-size"),
+    batch_size:    int           = typer.Option(5,    "--batch-size"),  # smaller = better worker saturation
     model_dir:     Path          = typer.Option(Path("/data/pipeline/models"),           "--model-dir"),
     proteome_dir:  Path          = typer.Option(Path("/data/pipeline/proteome_cache"),   "--proteome-dir"),
     log_path:      Optional[Path] = typer.Option(Path("/var/log/pipeline/t1_fba_batch.log"), "--log"),
