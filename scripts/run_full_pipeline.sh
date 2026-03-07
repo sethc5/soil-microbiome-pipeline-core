@@ -148,10 +148,10 @@ run_phase "Populate Tables (targets/taxa/receipts)" \
 # Needed before CarveMe model building in Phase 4. Idempotent.
 # ══════════════════════════════════════════════════════════════════════════════
 run_phase "Fetch Reference Literature" \
-  python scripts/fetch_references.py
+  python scripts/fetch_references.py || log "⚠  Fetch Reference Literature skipped (check S2_API_KEY)"
 
 run_phase "Gapfill Reference Literature" \
-  python scripts/fetch_references_gapfill.py
+  python scripts/fetch_references_gapfill.py || log "⚠  Gapfill References skipped (check S2_API_KEY)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 2: T2 dFBA Batch (dynamic FBA ODE simulations)
