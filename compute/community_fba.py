@@ -27,9 +27,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Reaction ID patterns that match target pathways
+# Reaction ID patterns that match target pathways.
+# NOTE: nifH_pathway uses EX_nh4_e as an informational proxy — these models
+# lack explicit nitrogenase reactions (rxn00006 maps to catalase in AGORA2-
+# style genomes; N2 is not a metabolite). The actual T1 pass criterion uses
+# the biomass objective value rather than any single reaction flux.
 _PATHWAY_PATTERNS: dict[str, list[str]] = {
-    "nifH_pathway": ["NITROGENASE", "NIF", "rxn00006"],
+    "nifH_pathway": ["EX_NH4", "NH4", "AMMO"],  # NH4 exchange as N-fixation proxy
     "carbon_sequestration": ["RBC", "RUBISCO", "CARBONFIX"],
     "methane_production": ["MCR", "METHCOGEN", "rxn09173"],
     "hydrocarbon_degradation": ["ALKB", "ALMO", "rxn00541"],
