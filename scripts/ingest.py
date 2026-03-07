@@ -378,18 +378,43 @@ def both(
     all_samples: list[dict] = []
     seen_ids: set[str] = set()
 
-    # --- NEON ---
+    # --- NEON (parallel site fetch) ---
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
         from adapters.neon_adapter import NEONAdapter
-        adapter_neon = NEONAdapter(token=neon_token or "", data_dir=str(staging_dir / "neon_cache"))
+
         effective_sites = neon_sites or _PRIORITY_NEON_SITES
         effective_years = years or _RECENT_YEARS
-        logger.info("Fetching NEON: %d sites, years %s", len(effective_sites), effective_years)
-        for sample in adapter_neon.iter_samples(sites=effective_sites, years=effective_years):
-            sid = sample.get("sample_id", "")
-            if sid and sid not in seen_ids:
-                seen_ids.add(sid)
-                all_samples.append(sample)
+        _neon_cache = str(staging_dir / "neon_cache")
+        _neon_token = neon_token or ""
+
+        def _fetch_one_site(site_code: str) -> tuple[str, list[dict]]:
+            """Fetch a single NEON site in a thread (each call gets its own adapter)."""
+            adapter = NEONAdapter(token=_neon_token, data_dir=_neon_cache)
+            return site_code, list(adapter.iter_samples(sites=[site_code], years=effective_years))
+
+        logger.info(
+            "Fetching NEON: %d sites in parallel (up to 8 concurrent), years %s",
+            len(effective_sites), effective_years,
+        )
+        _site_samples: dict[str, list[dict]] = {}
+        with ThreadPoolExecutor(max_workers=min(len(effective_sites), 8)) as _pool:
+            _futs = {_pool.submit(_fetch_one_site, s): s for s in effective_sites}
+            for _fut in _as_completed(_futs):
+                _site = _futs[_fut]
+                try:
+                    _, _samples = _fut.result()
+                    _site_samples[_site] = _samples
+                    logger.info("NEON site %s: %d samples fetched", _site, len(_samples))
+                except Exception as _exc:
+                    logger.warning("NEON fetch failed for site %s: %s", _site, _exc)
+
+        for _samples in _site_samples.values():
+            for sample in _samples:
+                sid = sample.get("sample_id", "")
+                if sid and sid not in seen_ids:
+                    seen_ids.add(sid)
+                    all_samples.append(sample)
         logger.info("NEON contributed %d samples", len(all_samples))
     except Exception as exc:
         logger.warning("NEON fetch failed: %s — continuing with SRA only", exc)

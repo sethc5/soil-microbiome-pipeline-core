@@ -503,6 +503,9 @@ def _write_results(db_path: str, results: list[dict]) -> tuple[int, int]:
     """Write T1 FBA results back to runs table. Returns (n_written, n_passed)."""
     conn = sqlite3.connect(db_path, timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")
+    # synchronous=OFF: ~3-5x faster bulk writes. WAL mode ensures atomicity —
+    # on crash the incomplete transaction is rolled back cleanly on next open.
+    conn.execute("PRAGMA synchronous=OFF")
     n_written, n_passed = 0, 0
 
     for r in results:
@@ -558,6 +561,7 @@ def _write_results(db_path: str, results: list[dict]) -> tuple[int, int]:
             logger.debug("Write failed for cid=%s: %s", r.get("community_id"), exc)
 
     conn.commit()
+    conn.execute("PRAGMA synchronous=NORMAL")  # restore safe default after commit
     conn.close()
     return n_written, n_passed
 

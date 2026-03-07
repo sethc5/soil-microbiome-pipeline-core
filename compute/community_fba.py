@@ -88,11 +88,28 @@ def _find_target_reactions(model: Any, target_pathway: str) -> list[Any]:
     return matched
 
 
+def _is_exchange_rxn(rxn: Any) -> bool:
+    """Return True if rxn is an exchange/boundary reaction (shared extracellular pool).
+
+    Exchange reactions represent nutrient flux across the community boundary and
+    must NOT be namespaced per organism — they are shared across all members.
+    Criteria: BIGG 'EX_' prefix, or single-metabolite with extracellular compartment.
+    """
+    if rxn.id.startswith("EX_"):
+        return True
+    mets = list(rxn.metabolites.keys())
+    if len(mets) == 1:
+        compartment = getattr(mets[0], "compartment", "") or ""
+        return compartment in ("e", "e0", "[e]", "extracellular")
+    return False
+
+
 def _merge_community_models(member_models: list, max_size: int) -> Any | None:
     """Merge member COBRApy models into a community model via compartment namespacing.
 
-    Each member gets its own cytoplasm compartment (c_i) and shares a
-    common extracellular pool (e) — a simplified community FBA approach.
+    Exchange reactions (EX_*) are shared across all organisms — they represent
+    the common extracellular nutrient pool. Only intracellular reactions are
+    suffixed per organism. This eliminates LP inflation and EX_* duplicate warnings.
     """
     try:
         import cobra
@@ -107,21 +124,37 @@ def _merge_community_models(member_models: list, max_size: int) -> Any | None:
     if len(models) == 1:
         return models[0].copy()
 
-    # Use cobra's merge utility if available
-    if hasattr(cobra.io, "merge_models"):
-        # Not a standard COBRApy API; use manual merge
-        pass
-
     community = models[0].copy()
     community.id = "community_model"
 
+    # Track exchange IDs already in the community (from org0).
+    # These are shared — subsequent organisms should not re-add them.
+    added_exchange_ids: set[str] = {
+        rxn.id for rxn in community.reactions if _is_exchange_rxn(rxn)
+    }
+
     for i, m in enumerate(models[1:], start=1):
         suffix = f"__org{i}"
+        rxns_to_add = []
         for rxn in m.reactions:
             new_rxn = rxn.copy()
-            new_rxn.id = f"{rxn.id}{suffix}"
-            community.add_reactions([new_rxn])
+            if _is_exchange_rxn(rxn):
+                # Shared extracellular pool: add once, skip duplicates silently
+                if rxn.id not in added_exchange_ids:
+                    added_exchange_ids.add(rxn.id)
+                    rxns_to_add.append(new_rxn)
+            else:
+                # Intracellular: namespace per organism
+                new_rxn.id = f"{rxn.id}{suffix}"
+                rxns_to_add.append(new_rxn)
+        community.add_reactions(rxns_to_add)
 
+    logger.debug(
+        "Community model: %d reactions (%d exchange shared, %d intracellular namespaced)",
+        len(community.reactions),
+        len(added_exchange_ids),
+        len(community.reactions) - len(added_exchange_ids),
+    )
     return community
 
 
