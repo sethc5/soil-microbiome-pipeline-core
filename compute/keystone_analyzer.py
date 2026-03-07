@@ -131,9 +131,9 @@ def identify_keystone_taxa(
         keystones.append({
             "taxon_id": f"org_{org_num}",
             "taxon_name": f"organism_{org_num}",
-            "flux_without": flux_without,
-            "flux_drop_pct": flux_drop_pct,
-            "is_keystone": is_keystone,
+            "flux_without": float(flux_without),
+            "flux_drop_pct": float(flux_drop_pct),
+            "is_keystone": bool(is_keystone),
             "functional_contribution": contribution_label,
         })
 
