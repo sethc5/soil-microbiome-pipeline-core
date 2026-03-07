@@ -408,7 +408,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             # already captured upstream by the T0.25 functional gene scanner
             # (nifH/nifD/nifK presence). T1 FBA confirms community-level metabolic
             # growth potential under the target soil conditions.
-            target_flux = max(0.0, solution.objective_value) if feasible else 0.0
+            target_flux = float(max(0.0, solution.objective_value)) if feasible else 0.0
 
             # Identify informational N-related exchange reactions for FVA bounding.
             # Fall back to EX_nh4_e (ammonium exchange) if no pattern hits.
