@@ -90,21 +90,55 @@ def _bh_correction(pvalues: list[float]) -> list[float]:
 
 
 def _load_community_taxa(db: SoilDB) -> dict[int, dict[str, float]]:
-    """Load t025_model (taxon abundance JSONs) keyed by community_id."""
+    """Load taxon abundance data keyed by community_id.
+
+    Preference order for taxon abundances:
+    1. runs.t025_model — PICRUSt2/HUMAnN3 pathway abundances (dict JSON)
+    2. communities.top_genera — genus-level relative abundances (list JSON)
+    3. communities.phylum_profile — phylum-level relative abundances (dict JSON)
+    """
     with db._connect() as conn:
         rows = conn.execute(
-            "SELECT community_id, t025_model, t1_target_flux FROM runs "
-            "WHERE t025_model IS NOT NULL"
+            """
+            SELECT r.community_id, r.t025_model, r.t1_target_flux,
+                   c.top_genera, c.phylum_profile
+            FROM runs r
+            JOIN communities c ON r.community_id = c.community_id
+            WHERE r.t1_pass = 1
+            """
         ).fetchall()
 
     result = {}
-    for community_id, model_json, flux in rows:
-        try:
-            data = json.loads(model_json)
-            if isinstance(data, dict):
-                result[community_id] = {"_flux": float(flux or 0), **{k: float(v) for k, v in data.items()}}
-        except Exception:
-            pass
+    for community_id, model_json, flux, genera_json, phylum_json in rows:
+        taxa: dict[str, float] = {}
+        # 1. t025_model (PICRUSt2 pathway dict)
+        if model_json and len(model_json) > 2:
+            try:
+                data = json.loads(model_json)
+                if isinstance(data, dict) and data:
+                    taxa = {k: float(v) for k, v in data.items()}
+            except Exception:
+                pass
+        # 2. top_genera (list of {name, rel_abundance})
+        if not taxa and genera_json and len(genera_json) > 2:
+            try:
+                data = json.loads(genera_json)
+                if isinstance(data, list):
+                    taxa = {item["name"]: float(item["rel_abundance"])
+                            for item in data if "name" in item and "rel_abundance" in item}
+            except Exception:
+                pass
+        # 3. phylum_profile (dict)
+        if not taxa and phylum_json and len(phylum_json) > 2:
+            try:
+                data = json.loads(phylum_json)
+                if isinstance(data, dict) and data:
+                    taxa = {k: float(v) for k, v in data.items()}
+            except Exception:
+                pass
+
+        if taxa:
+            result[community_id] = {"_flux": float(flux or 0), **taxa}
     return result
 
 
