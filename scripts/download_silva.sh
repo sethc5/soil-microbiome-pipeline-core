@@ -1,59 +1,81 @@
 #!/usr/bin/env bash
-# scripts/download_silva.sh — Download and prepare SILVA 16S reference for vsearch
+# scripts/download_silva.sh — Download and prepare 16S reference for vsearch
 #
-# Downloads SILVA 138.1 SSURef Nr99 (non-redundant 99% OTU representatives)
-# ~400MB compressed → ~1.5GB decompressed.
-# Output: /data/pipeline/ref/SILVA_138.1_SSURef.fasta (formatted for vsearch)
+# Uses NCBI 16S_ribosomal_RNA BLAST database (67MB, public, updated monthly).
+# Extracts FASTA + taxonomy for vsearch classification.
+#
+# Output: /data/pipeline/ref/16S_ref.fasta
 #
 # Usage:
-#   bash scripts/download_silva.sh
-#   bash scripts/download_silva.sh --ref-dir /custom/path
+#   bash scripts/download_silva.sh [ref_dir]
 
 set -euo pipefail
 
 REF_DIR="${1:-/data/pipeline/ref}"
-SILVA_GZ="SILVA_138.1_SSURef_Nr99_tax_silva.fasta.gz"
-SILVA_URL="https://www.arb-silva.de/fileadmin/silva_databases/release_138_1/Exports/${SILVA_GZ}"
-SILVA_MIRROR="https://ftp.arb-silva.de/release_138_1/Exports/${SILVA_GZ}"
-OUT_FASTA="${REF_DIR}/SILVA_138.1_SSURef.fasta"
-OUT_GZ="${REF_DIR}/${SILVA_GZ}"
-
 BIOINFO_BIN="/home/deploy/miniforge3/envs/bioinfo/bin"
-VSEARCH="${BIOINFO_BIN}/vsearch"
+BLASTDBCMD="${BIOINFO_BIN}/blastdbcmd"
+OUT_FASTA="${REF_DIR}/16S_ref.fasta"
+NCBI_URL="https://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
+BLAST_DB_DIR="${REF_DIR}/16S_blast_db"
 
-mkdir -p "${REF_DIR}"
+mkdir -p "${REF_DIR}" "${BLAST_DB_DIR}"
 
-if [ -f "${OUT_FASTA}" ] && [ "$(stat -c%s "${OUT_FASTA}")" -gt 500000000 ]; then
-    echo "SILVA ref already exists: ${OUT_FASTA}  ($(du -sh "${OUT_FASTA}" | cut -f1))"
+# ── Check if already built ──────────────────────────────────────────────────
+if [ -f "${OUT_FASTA}" ] && [ "$(stat -c%s "${OUT_FASTA}" 2>/dev/null || echo 0)" -gt 10000000 ]; then
+    echo "16S reference already exists: ${OUT_FASTA}  ($(du -sh "${OUT_FASTA}" | cut -f1))"
     exit 0
 fi
 
-echo "=== Downloading SILVA 138.1 SSURef Nr99 ==="
-echo "  Destination: ${OUT_GZ}"
-echo "  ~400MB compressed..."
+echo "=== Downloading NCBI 16S ribosomal RNA BLAST db (~67MB) ==="
+TARBALL="${BLAST_DB_DIR}/16S_ribosomal_RNA.tar.gz"
+curl -fSL --retry 3 --retry-delay 10 -C - -o "${TARBALL}" "${NCBI_URL}"
+echo "  Download complete: $(du -sh "${TARBALL}" | cut -f1)"
 
-# Try primary, fallback to mirror
-if ! curl -fSL --retry 3 --retry-delay 10 -C - -o "${OUT_GZ}" "${SILVA_URL}"; then
-    echo "Primary failed, trying mirror..."
-    curl -fSL --retry 3 --retry-delay 10 -C - -o "${OUT_GZ}" "${SILVA_MIRROR}"
+echo "=== Extracting BLAST database ==="
+cd "${BLAST_DB_DIR}"
+tar -xzf "${TARBALL}"
+
+echo "=== Extracting sequences with taxonomy labels ==="
+# Dump all sequences; header includes accession then lineage when -outfmt uses %l
+"${BLASTDBCMD}" \
+    -db "${BLAST_DB_DIR}/16S_ribosomal_RNA" \
+    -entry all \
+    -outfmt "%a %l\n%s\n" \
+    > "${OUT_FASTA}.tmp" 2>/dev/null
+
+# Convert to FASTA with taxonomy in header
+python3 - "${OUT_FASTA}.tmp" "${OUT_FASTA}" << 'PYEOF'
+import sys, re
+src, dst = sys.argv[1], sys.argv[2]
+written = 0
+with open(src) as fin, open(dst, "w") as fout:
+    for line in fin:
+        line = line.rstrip()
+        if not line:
+            continue
+        # First line of each pair: "accession   lineage"
+        # Second line: nucleotide sequence
+        if re.match(r'^[A-Z]{1,3}[_\d]', line) or '\t' in line or ';' in line[:5] is False:
+            parts = line.split(None, 1)
+            acc = parts[0]
+            tax = parts[1] if len(parts) > 1 else "Unknown"
+            fout.write(f">{acc} {tax}\n")
+            written += 1
+        else:
+            fout.write(f"{line}\n")
+print(f"Written ~{written} entries")
+PYEOF
+
+# Fallback: if conversion produced empty file, just use raw blastdbcmd FASTA dump
+if [ ! -s "${OUT_FASTA}" ] || [ "$(stat -c%s "${OUT_FASTA}")" -lt 10000 ]; then
+    echo "  Raw dump fallback..."
+    "${BLASTDBCMD}" \
+        -db "${BLAST_DB_DIR}/16S_ribosomal_RNA" \
+        -entry all \
+        -outfmt "%f" \
+        -out "${OUT_FASTA}"
 fi
 
-echo "=== Decompressing ==="
-gunzip -k "${OUT_GZ}"
-mv "${REF_DIR}/SILVA_138.1_SSURef_Nr99_tax_silva.fasta" "${OUT_FASTA}" 2>/dev/null || true
-
-if [ -f "${OUT_FASTA}" ]; then
-    echo "=== Verifying with vsearch (check orientation) ==="
-    # vsearch requires no line-wrapping > 60kb, fasta is fine as-is
-    head -2 "${OUT_FASTA}"
-    NUMSEQ=$(grep -c "^>" "${OUT_FASTA}" || true)
-    echo "=== Done: ${NUMSEQ} sequences in ${OUT_FASTA} ==="
-    echo "Size: $(du -sh "${OUT_FASTA}" | cut -f1)"
-else
-    echo "ERROR: output file not found after decompression"
-    exit 1
-fi
-
-# Clean up gz if decompression succeeded
-rm -f "${OUT_GZ}"
-echo "=== SILVA reference ready ==="
+NUMSEQ=$(grep -c "^>" "${OUT_FASTA}" 2>/dev/null || echo 0)
+echo "=== Done: ${NUMSEQ} sequences | $(du -sh "${OUT_FASTA}" | cut -f1) | ${OUT_FASTA} ==="
+head -3 "${OUT_FASTA}"

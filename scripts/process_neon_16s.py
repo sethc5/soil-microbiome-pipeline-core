@@ -73,15 +73,31 @@ TOP_N_PHYLA  = 25
 
 def _parse_silva_taxonomy(taxstr: str) -> tuple[str, str]:
     """
-    Parse SILVA taxonomy string like:
-      'Bacteria;Firmicutes;Bacilli;Lactobacillales;Lactobacillaceae;...'
+    Parse taxonomy string from NCBI 16S db or SILVA format:
+      NCBI: 'Bacteria; Firmicutes; Bacilli; Lactobacillales; ...'
+      SILVA: 'Bacteria;Firmicutes;Bacilli;...'
+      NCBI defline: 'Bacillus subtilis strain NRRL NRS-744 16S rRNA [...]'
     → (phylum, genus)
     """
-    parts = [p.strip() for p in taxstr.split(";") if p.strip()]
+    # Handle NCBI lineage format (semicolon+space separated)
+    taxstr = taxstr.strip()
+    if "; " in taxstr:
+        parts = [p.strip() for p in taxstr.split(";") if p.strip()]
+    elif ";" in taxstr:
+        parts = [p.strip() for p in taxstr.split(";") if p.strip()]
+    else:
+        # NCBI defline-style: 'Bacillus subtilis strain...' → genus is first word
+        words = taxstr.replace("[", "").replace("]", "").split()
+        phylum = "Unknown"
+        genus = words[0] if words else "Unknown"
+        return phylum, genus
+
+    # Skip 'cellular organisms' and 'root' prefixes common in NCBI lineage
+    parts = [p for p in parts if p.lower() not in ("cellular organisms", "root", "")]
     domain = parts[0] if parts else "Unknown"
     phylum = parts[1] if len(parts) > 1 else "Unknown"
     genus  = parts[5] if len(parts) > 5 else (parts[-1] if parts else "Unknown")
-    # Skip numeric clade codes like D_0__, D_1__ in older SILVA builds
+    # Filter out numeric clade codes like D_0__, D_1__ in older SILVA builds
     if phylum.startswith("D_"):
         phylum = parts[2] if len(parts) > 2 else "Unknown"
     if genus.startswith("D_"):
@@ -91,9 +107,10 @@ def _parse_silva_taxonomy(taxstr: str) -> tuple[str, str]:
 
 def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
     """
-    Read vsearch ucout (UC format) or blast6 hits and build profiles.
-    Expected format: query, target, identity (blast6 first 3 cols + taxstring)
-    Returns: phylum_profile (freq), top_genera (freq), shannon_diversity
+    Read vsearch UC-format output and build taxonomy profiles.
+    UC format columns: type, cluster, size, pct_id, strand, ., ., cigar, query, centroid
+    Type H=hit, N=no_match.
+    Centroid column (index 9) contains the full reference label including taxonomy.
     """
     phylum_counts: dict[str, int] = defaultdict(int)
     genus_counts:  dict[str, int] = defaultdict(int)
@@ -106,22 +123,26 @@ def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
                 if not line or line.startswith("#"):
                     continue
                 parts = line.split("\t")
-                if len(parts) < 2:
-                    continue
-                taxstr = parts[-1]  # last column = taxonomy in vsearch --db_fasta search
-                hit_type = parts[0] if len(parts) > 9 else "H"
 
-                if parts[0] in ("N",):  # no-hit in UC format
+                if parts[0] == "N":  # no hit
                     total += 1
                     phylum_counts["Unclassified"] += 1
                     continue
+                if parts[0] != "H":  # skip non-hit rows (S=seed, C=cluster)
+                    continue
+
+                # Column 9 (index 9) = full centroid label: "accession taxonomy"
+                target_label = parts[9] if len(parts) > 9 else ""
+                # Strip the accession (first word) to get tax string
+                label_parts = target_label.split(None, 1)
+                taxstr = label_parts[1] if len(label_parts) > 1 else label_parts[0] if label_parts else "Unknown"
 
                 phylum, genus = _parse_silva_taxonomy(taxstr)
                 phylum_counts[phylum] += 1
                 genus_counts[genus]   += 1
                 total += 1
     except Exception as e:
-        logger.warning("Could not parse hits file %s: %s", hits_file, e)
+        logger.warning("Could not parse UC hits file %s: %s", hits_file, e)
 
     if total == 0:
         return {}, {}, 0.0
@@ -198,7 +219,7 @@ def _merge_and_classify(
     Returns path to hits TSV or None.
     """
     merged = workdir / "merged.fasta"
-    hits   = workdir / "hits.tsv"
+    hits   = workdir / "hits.uc"
     notmerged = workdir / "notmerged.fasta"
 
     # Step 1: merge paired reads
@@ -224,12 +245,14 @@ def _merge_and_classify(
     if not merged.exists() or merged.stat().st_size == 0:
         return None
 
-    # Step 2: classify against SILVA at species/97% level
+    # Step 2: classify against 16S reference using UC output format
+    # --notrunclabels: use full reference header (includes taxonomy string)
+    # --uc: UC-format output includes full centroid label in column 9
     cmd_class = [
         VSEARCH, "--usearch_global", str(merged),
         "--db", silva_db,
         "--id", str(VSEARCH_ID),
-        "--blast6out", str(hits),
+        "--uc", str(hits),
         "--notrunclabels",
         "--threads", "4",
         "--quiet",
@@ -397,8 +420,8 @@ def parse_args() -> argparse.Namespace:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--db",      default="/data/pipeline/db/soil_microbiome.db")
     p.add_argument("--staging", default="/data/pipeline/staging/neon_16s")
-    p.add_argument("--silva",   default="/data/pipeline/ref/SILVA_138.1_SSURef.fasta",
-                   help="SILVA 16S FASTA reference (pre-formatted for vsearch).")
+    p.add_argument("--silva",   default="/data/pipeline/ref/16S_ref.fasta",
+                   help="16S FASTA reference for vsearch. Build with: bash scripts/download_silva.sh")
     p.add_argument("--sites",   nargs="*",
                    default=["HARV","ORNL","KONZ","WOOD","CPER","UNDE","STEI",
                              "DCFS","NOGP","CLBJ","OAES"],
