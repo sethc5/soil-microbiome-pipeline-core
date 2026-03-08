@@ -108,7 +108,9 @@ with open(lineage_f) as fh:
         phylum  = p[7]  or ""
         kingdom = p[8]  or ""
         superk  = p[9]  or ""
-        parts   = [x for x in [superk, kingdom, phylum, clss, genus] if x]
+        # Omit kingdom level (NCBI 2024 adds Bacillati/Pseudomonadati between
+        # domain and phylum) so phylum is always at index 1 for the parser.
+        parts   = [x for x in [superk, phylum, clss, genus] if x]
         taxid2lin[taxid] = "; ".join(parts) if parts else "Unknown"
 print(f"  {len(taxid2lin):,} taxonomy entries loaded", flush=True)
 
