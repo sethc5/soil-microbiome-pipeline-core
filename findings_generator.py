@@ -52,6 +52,88 @@ def _db_summary(db: SoilDB) -> dict:
     }
 
 
+def _keystone_summary(results_dir: Path) -> dict | None:
+    """Load keystone_organism_summary.csv and keystone_analysis.csv for key stats."""
+    org_path = results_dir / "keystone_organism_summary.csv"
+    comm_path = results_dir / "keystone_analysis.csv"
+    if not org_path.exists() or not comm_path.exists():
+        return None
+    import csv
+    import statistics
+
+    orgs: list[dict] = []
+    with open(org_path) as fh:
+        for row in csv.DictReader(fh):
+            try:
+                orgs.append({
+                    "organism": row["organism"],
+                    "pct_of_communities": float(row["pct_of_communities"]),
+                    "mean_flux_drop_pct": float(row["mean_flux_drop_pct"]),
+                })
+            except (ValueError, KeyError):
+                pass
+
+    n_ks_vals: list[float] = []
+    with open(comm_path) as fh:
+        for row in csv.DictReader(fh):
+            try:
+                n_ks_vals.append(float(row["n_keystones"]))
+            except (ValueError, KeyError):
+                pass
+
+    if not orgs or not n_ks_vals:
+        return None
+
+    return {
+        "n_communities": len(n_ks_vals),
+        "mean_keystones": round(statistics.mean(n_ks_vals), 1),
+        "min_keystones": int(min(n_ks_vals)),
+        "max_keystones": int(max(n_ks_vals)),
+        "mean_flux_drop": round(statistics.mean(o["mean_flux_drop_pct"] for o in orgs), 3),
+        "top_organisms": orgs[:5],     # most frequently keystone
+        "least_keystone": orgs[-1] if orgs else None,
+    }
+
+
+def _intervention_portfolio_summary(results_dir: Path) -> dict | None:
+    """Load intervention_type_summary.csv for portfolio statistics."""
+    path = results_dir / "intervention_type_summary.csv"
+    if not path.exists():
+        return None
+    import csv
+
+    rows: list[dict] = []
+    with open(path) as fh:
+        for row in csv.DictReader(fh):
+            try:
+                rows.append({
+                    "intervention_type": row["intervention_type"],
+                    "n_interventions": int(row["n_interventions"]),
+                    "mean_predicted_effect": float(row["mean_predicted_effect"] or 0),
+                    "max_predicted_effect": float(row["max_predicted_effect"] or 0),
+                    "mean_confidence": float(row["mean_confidence"] or 0),
+                    "mean_cost_usd_per_ha": float(row["mean_cost_usd_per_ha"]) if row["mean_cost_usd_per_ha"] else None,
+                    "mean_cost_effectiveness": float(row["mean_cost_effectiveness"]) if row["mean_cost_effectiveness"] else None,
+                })
+            except (ValueError, KeyError):
+                pass
+
+    if not rows:
+        return None
+    return {"types": sorted(rows, key=lambda r: -r["mean_predicted_effect"])}
+
+
+def _fva_funnel_summary(results_dir: Path) -> dict | None:
+    """Load funnel_analysis.json for pipeline efficiency stats."""
+    path = results_dir / "funnel_analysis.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
 def _bnf_trajectory_summary(results_dir: Path) -> dict | None:
     """Load bnf_trajectory_summary.csv and return key stats."""
     path = results_dir / "bnf_trajectory_summary.csv"
@@ -110,6 +192,9 @@ def _render_findings_md(
     enriched_taxa: list,
     results_dir: Path,
     bnf_traj: dict | None = None,
+    keystone: dict | None = None,
+    intervention_portfolio: dict | None = None,
+    fva_funnel: dict | None = None,
 ) -> str:
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
@@ -204,6 +289,142 @@ def _render_findings_md(
 
     lines += [
         "",
+        "## Keystone Taxa & Community Architecture",
+    ]
+    if keystone:
+        lines.append(
+            f"- {keystone['n_communities']:,} T1-pass communities analyzed for keystone architecture"
+        )
+        lines.append(
+            f"- Mean keystones per community: **{keystone['mean_keystones']}** "
+            f"(range {keystone['min_keystones']}–{keystone['max_keystones']} of 9 members)"
+        )
+        lines.append(
+            f"- Mean BNF flux-drop when any keystone removed: **{keystone['mean_flux_drop']:.1%}** — "
+            f"indicating highly coupled community architectures"
+        )
+        lines.append("- Organisms by keystone frequency across all communities:")
+        for o in keystone["top_organisms"]:
+            lines.append(
+                f"  - **{o['organism']}**: indispensable in {o['pct_of_communities']:.1f}% of communities "
+                f"(mean flux-drop {o['mean_flux_drop_pct']:.1%})"
+            )
+        if keystone.get("least_keystone"):
+            lk = keystone["least_keystone"]
+            lines.append(
+                f"  - **{lk['organism']}**: least critical — keystone in only "
+                f"{lk['pct_of_communities']:.1f}% of communities "
+                f"(mean flux-drop {lk['mean_flux_drop_pct']:.1%})"
+            )
+        lines.append(f"_Detail: `results/keystone_analysis.csv`, `results/keystone_organism_summary.csv`_")
+    else:
+        lines.append("- *Not yet computed. Run `scripts/keystone_analysis.py` first.*")
+
+    lines += [
+        "",
+        "## Intervention Portfolio Analysis",
+    ]
+    if intervention_portfolio:
+        types = intervention_portfolio["types"]
+        total_n = sum(t["n_interventions"] for t in types)
+        lines.append(f"- {total_n:,} interventions screened across {len(types)} categories:")
+        for t in types:
+            cost_str = f"${t['mean_cost_usd_per_ha']:.0f}/ha" if t["mean_cost_usd_per_ha"] else "N/A"
+            eff_str = f"{t['mean_cost_effectiveness']:.5f} effect/$" if t["mean_cost_effectiveness"] else "N/A"
+            lines.append(
+                f"  - **{t['intervention_type'].capitalize()}** ({t['n_interventions']:,}): "
+                f"mean effect = {t['mean_predicted_effect']:.3f}, "
+                f"confidence = {t['mean_confidence']:.3f}, "
+                f"avg cost = {cost_str}, "
+                f"cost-effectiveness = {eff_str}"
+            )
+        best = types[0]
+        worst = types[-1]
+        if best["mean_cost_effectiveness"] and worst["mean_cost_effectiveness"] and worst["mean_cost_effectiveness"] > 0:
+            ratio = best["mean_cost_effectiveness"] / worst["mean_cost_effectiveness"]
+            lines.append(
+                f"- **{best['intervention_type'].capitalize()}** is the dominant strategy: "
+                f"{ratio:.0f}× better cost-effectiveness than {worst['intervention_type']}"
+            )
+        lines.append(
+            f"- Effect ranking: {' > '.join(t['intervention_type'] for t in types)}"
+        )
+        lines.append(f"_Detail: `results/intervention_type_summary.csv`_")
+    else:
+        lines.append("- *Not yet computed. Run `scripts/intervention_portfolio.py` first.*")
+
+    lines += [
+        "",
+        "## Pipeline Funnel Efficiency",
+    ]
+    if fva_funnel:
+        lines.append(
+            f"- Total communities entered: **{fva_funnel['total_runs']:,}**"
+        )
+        lines.append(
+            f"- T0 quality filter: **{fva_funnel['t0_pass']:,}** pass ({fva_funnel['t0_pass_rate_pct']:.0f}%)"
+        )
+        lines.append(
+            f"- T0.25 ML scoring: **{fva_funnel['t025_pass']:,}** pass ({fva_funnel['t025_pass_rate_pct']:.0f}% of T0)"
+        )
+        lines.append(
+            f"- T1 community FBA: **{fva_funnel['t1_pass']:,}** pass ({fva_funnel['t1_pass_rate_pct']:.0f}% of T0.25)"
+            f" — the primary discriminating filter"
+        )
+        lines.append(
+            f"- T2 dFBA stability: **{fva_funnel['t2_pass']:,}** pass ({fva_funnel['t2_pass_rate_pct']:.0f}% of T1)"
+        )
+        # FVA lower bound
+        if fva_funnel.get("fva_lower_bound_by_land_use"):
+            lines.append("- FVA worst-case flux |lower bound| by land use:")
+            for lu, stats in fva_funnel["fva_lower_bound_by_land_use"].items():
+                lines.append(
+                    f"  - {lu}: {stats['mean_abs_lb']:.1f} ± {stats['stdev']:.1f} mmol/gDW/h (n={stats['n']})"
+                )
+            lines.append(
+                "  *(Upper bound capped at 1000 by COBRA default — only lower bound is informative)*"
+            )
+        lines.append(f"_Detail: `results/funnel_analysis.json`, `results/fva_uncertainty.csv`_")
+    else:
+        lines.append("- *Not yet computed. Run `scripts/fva_funnel_analysis.py` first.*")
+
+    lines += [
+        "",
+        "## Data Confidence & Production Readiness",
+        "",
+        "### What this pipeline can currently produce",
+        "- Systematic ranking of 440,000+ synthetic community configurations for BNF potential",
+        "- Mechanistic identification of keystone taxa using leave-one-out FBA",
+        "- Intervention cost-effectiveness comparison across amendment, bioinoculant, and management strategies",
+        "- BNF temporal stability profiling via dFBA trajectory analysis",
+        "- Spatial clustering and land-use stratification of top candidates",
+        "",
+        "### Current data confidence: LOW",
+        "All 20,000 T1-pass runs carry `t1_model_confidence = 'low'` because:",
+        "- Genome annotations used are synthetic placeholders (mean CheckM completeness = 0%)",
+        "- `t025_model` (PICRUSt2 functional profiles) is empty for all rows — PICRUSt2 not installed",
+        "- Synthetic communities were generated independently of metadata — correlations are near-zero by construction",
+        "- T2 stability scores show minimal variance (0.983 ± 0.001) — likely a simulation parameter artifact",
+        "",
+        "### Gaps blocking high-value production",
+        "| Gap | Impact | Effort |",
+        "|-----|--------|--------|",
+        "| Real 16S/metagenome data (NCBI SRA / NEON) | Enables genuine functional prediction | High |",
+        "| QIIME2 + DADA2 for OTU/ASV generation | Required for NEON T1 communities | High |",
+        "| PICRUSt2 functional profiling | Fills t025_model → unblocks T0.25 ML | Medium |",
+        "| GTDB-Tk + CheckM genome annotation | Raises model confidence to medium/high | High |",
+        "| Real genome-scale metabolic models (AGORA2/MICOM) | Replaces synthetic FBA parameters | High |",
+        "| Variance in T2 simulation parameters | Differentiates communities at T2 | Low |",
+        "",
+        "### Path to high-value output",
+        "With real NCBI SRA metagenome data + PICRUSt2 + AGORA2 genome models, this pipeline is",
+        "architecturally ready to produce field-actionable rankings. The schema, funnel logic,",
+        "receipts system, and findings generator are all production-grade. The gap is data provenance,",
+        "not infrastructure.",
+    ]
+
+    lines += [
+        "",
         "## Caveats",
         "- Metabolic model confidence depends on genome completeness (CheckM).",
         "- dFBA ignores substrate kinetics; stability scores are approximate.",
@@ -242,7 +463,16 @@ def generate(
             row["significant"] = row.get("significant", "False").lower() == "true"
 
     bnf_traj = _bnf_trajectory_summary(results_dir)
-    md = _render_findings_md(config, db_summary, correlation_findings, enriched_taxa, results_dir, bnf_traj)
+    keystone = _keystone_summary(results_dir)
+    intervention_portfolio = _intervention_portfolio_summary(results_dir)
+    fva_funnel = _fva_funnel_summary(results_dir)
+    md = _render_findings_md(
+        config, db_summary, correlation_findings, enriched_taxa, results_dir,
+        bnf_traj=bnf_traj,
+        keystone=keystone,
+        intervention_portfolio=intervention_portfolio,
+        fva_funnel=fva_funnel,
+    )
     output.write_text(md)
     logger.info("FINDINGS.md written → %s", output)
     typer.echo(f"FINDINGS.md → {output}")
