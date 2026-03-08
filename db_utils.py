@@ -113,6 +113,9 @@ CREATE TABLE IF NOT EXISTS communities (
     top_genera          TEXT,               -- JSON: top 50 genera
     otu_table_path      TEXT,               -- path to full OTU/ASV table file
 
+    -- Provenance and queued work
+    notes               TEXT,               -- JSON: arbitrary metadata (e.g. FASTQ URLs for future processing)
+
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -255,6 +258,7 @@ MIGRATION_SQL: list[tuple[str, str]] = [
     ("communities",  "fungal_bacterial_ratio REAL"),
     ("communities",  "its_profile TEXT"),
     ("communities",  "mrna_to_dna_ratio REAL"),
+    ("communities",  "notes TEXT"),
     ("runs",         "t1_flux_lower_bound REAL"),
     ("runs",         "t1_flux_upper_bound REAL"),
     ("runs",         "t1_genome_completeness_mean REAL"),
