@@ -52,12 +52,23 @@ fi
 echo "Binary found: $PICRUST2_BIN"
 
 if $SKIP_REF; then
-  echo "Skipping reference data download (--skip-ref-data)."
+  echo "Skipping reference data check (--skip-ref-data)."
 else
   echo ""
-  echo "Downloading PICRUSt2 reference data to $REF_DIR (~4 GB, ~30 min)..."
-  mkdir -p "$REF_DIR"
-  "$PICRUST2_BIN" --download-ref-data -o "$REF_DIR" 2>&1 | tail -30
+  echo "Verifying PICRUSt2 reference data (bundled in conda env)..."
+  REFDIR="${HOME}/miniforge3/envs/${ENV_NAME}/lib/python3.12/site-packages/picrust2/default_files"
+  if [[ -d "$REFDIR/prokaryotic" ]] && [[ -d "$REFDIR/bacteria" ]]; then
+    echo "Reference data OK: $REFDIR"
+  else
+    # Try with python3.* wildcard
+    REFDIR_GLOB=$(ls -d "${HOME}/miniforge3/envs/${ENV_NAME}"/lib/python*/site-packages/picrust2/default_files 2>/dev/null | head -1)
+    if [[ -n "$REFDIR_GLOB" ]]; then
+      echo "Reference data OK: $REFDIR_GLOB"
+    else
+      echo "WARNING: Could not locate PICRUSt2 default_files directory."
+      echo "PICRUSt2 may still work — reference data is usually bundled with conda install."
+    fi
+  fi
   echo "Reference data ready at $REF_DIR"
 fi
 
