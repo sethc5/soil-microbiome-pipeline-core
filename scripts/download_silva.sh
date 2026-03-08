@@ -20,7 +20,7 @@ BIOINFO_BIN="/home/deploy/miniforge3/envs/bioinfo/bin"
 BLASTDBCMD="${BIOINFO_BIN}/blastdbcmd"
 OUT_FASTA="${REF_DIR}/16S_ref.fasta"
 NCBI_16S_URL="https://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
-TAXDUMP_URL="https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz"
+TAXDUMP_URL="https://ftp.ncbi.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz"
 BLAST_DB_DIR="${REF_DIR}/16S_blast_db"
 TAX_DIR="${REF_DIR}/taxdump"
 
@@ -65,15 +65,15 @@ echo "  Sequences: $(grep -c "^>" "${RAW_FASTA}")"
 echo "  Taxid map: $(wc -l < "${TAXID_MAP}") entries"
 
 # ── Step 4: download NCBI rankedlineage ──────────────────────────────────
-TAXDUMP_TGZ="${TAX_DIR}/taxdump.tar.gz"
+TAXDUMP_TGZ="${TAX_DIR}/new_taxdump.tar.gz"
 LINEAGE_FILE="${TAX_DIR}/rankedlineage.dmp"
 
 if [ ! -f "${LINEAGE_FILE}" ]; then
-    echo "=== Downloading NCBI taxonomy (~60MB) ==="
+    echo "=== Downloading NCBI new_taxdump (~60MB, contains rankedlineage.dmp) ==="
     curl -fSL --retry 3 --retry-delay 10 -C - -o "${TAXDUMP_TGZ}" "${TAXDUMP_URL}"
     echo "  Taxdump: $(du -sh "${TAXDUMP_TGZ}" | cut -f1)"
     cd "${TAX_DIR}"
-    tar -xzf "${TAXDUMP_TGZ}" rankedlineage.dmp 2>/dev/null || tar -xzf "${TAXDUMP_TGZ}"
+    tar -xzf "${TAXDUMP_TGZ}" rankedlineage.dmp
     cd -
 fi
 
