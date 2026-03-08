@@ -33,32 +33,42 @@ class MGnifyAdapter:
         self._token = config.get("mgnify_token")  # optional OAuth token
 
     def _get(self, url: str, params: dict | None = None) -> dict | None:
-        """Rate-limited GET to MGnify API."""
-        import json
+        """Rate-limited GET to MGnify API (uses httpx for TLS compatibility)."""
         import time
-        import urllib.request
-        import urllib.parse
+        try:
+            import httpx as _httpx
+        except ImportError:
+            import requests as _requests
+            _httpx = None
 
         elapsed = time.monotonic() - self._last_request
         if elapsed < self._MIN_INTERVAL:
             time.sleep(self._MIN_INTERVAL - elapsed)
 
-        if params:
-            url = url + "?" + urllib.parse.urlencode(params)
-
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", "User-Agent": "soil-microbiome-pipeline/1.0"}
         if self._token:
             headers["Authorization"] = f"Token {self._token}"
 
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
+        for attempt in range(3):
+            try:
+                if _httpx is not None:
+                    resp = _httpx.get(url, params=params, headers=headers, timeout=90)
+                else:
+                    resp = _requests.get(url, params=params, headers=headers, timeout=90)
                 self._last_request = time.monotonic()
-                return json.loads(resp.read())
-        except Exception as exc:
-            logger.debug("MGnify API request failed: %s", exc)
-            self._last_request = time.monotonic()
-            return None
+                if resp.status_code == 200:
+                    return resp.json()
+                logger.warning("MGnify API %s → HTTP %s (attempt %d)", url, resp.status_code, attempt + 1)
+                if resp.status_code in (500, 502, 503):
+                    time.sleep(10 * (attempt + 1))  # backoff on server errors
+                    continue
+                return None
+            except Exception as exc:
+                logger.warning("MGnify API request failed (attempt %d): %s", attempt + 1, exc)
+                self._last_request = time.monotonic()
+                if attempt < 2:
+                    time.sleep(5 * (attempt + 1))
+        return None
 
     def search_samples(self, biome_lineage: str = "root:Environmental:Terrestrial:Soil", **filters) -> Iterator[dict]:
         """Yield sample metadata from MGnify matching biome lineage.
@@ -140,3 +150,230 @@ class MGnifyAdapter:
             count = attrs.get("count", 0)
             profile[lineage] = float(count)
         return profile
+
+    def search_analyses(
+        self,
+        biome: str = "root:Environmental:Terrestrial:Soil",
+        experiment_type: str = "amplicon",
+        max_results: int = 5000,
+        pipeline_version: str | None = None,
+    ) -> Iterator[dict]:
+        """
+        Yield analysis-level records from MGnify (one per processed sample run).
+
+        Each record has:  accession, sample_accession, study_accession,
+        experiment_type, pipeline_version, instrument_platform, biome_lineage.
+
+        This is the primary entry point for bulk ingestion — analyses already have
+        QC'd taxonomy and functional profiles, no FASTQ processing needed.
+        """
+        from urllib.parse import quote
+        # Strategy: enumerate soil studies via /biomes/{lineage}/studies, then
+        # fetch analyses per study via /studies/{id}/analyses.
+        # This avoids the faulty /analyses flat endpoint and the broken biome_name filter.
+        biome_path = quote(biome, safe="")  # encode colons → %3A
+        studies_url = f"{MGNIFY_API_BASE}/biomes/{biome_path}/studies"
+        logger.info("search_analyses: fetching studies from %s", studies_url)
+
+        study_page = 1
+        seen = 0
+        while seen < max_results:
+            sdata = self._get(studies_url, {"page_size": self._PAGE_SIZE, "page": study_page})
+            if not sdata:
+                logger.warning("search_analyses: no data from studies endpoint (API may be down)")
+                break
+            studies = sdata.get("data", [])
+            if not studies:
+                break
+
+            for study in studies:
+                if seen >= max_results:
+                    return
+                study_id = study.get("id", "")
+                analyses_url = f"{MGNIFY_API_BASE}/studies/{study_id}/analyses"
+                a_params: dict = {
+                    "experiment_type": experiment_type,
+                    "page_size": self._PAGE_SIZE,
+                    "page": 1,
+                }
+                if pipeline_version:
+                    a_params["pipeline_version"] = pipeline_version
+
+                a_page = 1
+                while seen < max_results:
+                    a_params["page"] = a_page
+                    adata = self._get(analyses_url, a_params)
+                    if not adata:
+                        break
+                    items = adata.get("data", [])
+                    if not items:
+                        break
+                    for item in items:
+                        if seen >= max_results:
+                            return
+                        attrs = item.get("attributes", {})
+                        rels  = item.get("relationships", {})
+                        yield {
+                            "accession":           item.get("id", ""),
+                            "sample_accession":    (
+                                rels.get("sample", {}).get("data", {}) or {}
+                            ).get("id", ""),
+                            "study_accession":     study_id,
+                            "experiment_type":     attrs.get("experiment-type", ""),
+                            "pipeline_version":    attrs.get("pipeline-version", ""),
+                            "instrument_platform": attrs.get("instrument-platform", ""),
+                            "biome_lineage":       biome,
+                        }
+                        seen += 1
+                    if not adata.get("links", {}).get("next"):
+                        break
+                    a_page += 1
+
+            if not sdata.get("links", {}).get("next"):
+                break
+            study_page += 1
+
+    def get_analysis_metadata(self, accession: str) -> dict:
+        """
+        Return the MGnify /analyses/{id} record including linked sample metadata.
+
+        Returns a flat dict with analysis attrs merged with the sample's
+        geographic + environmental attributes.
+        """
+        url = f"{MGNIFY_API_BASE}/analyses/{accession}"
+        data = self._get(url)
+        if not data:
+            return {}
+        item  = data.get("data", {})
+        attrs = item.get("attributes", {})
+
+        # Fetch linked sample for geo/env metadata
+        sample_href = (
+            item.get("relationships", {})
+                .get("sample", {})
+                .get("links", {})
+                .get("related", "")
+        )
+        sample_attrs: dict = {}
+        if sample_href:
+            sample_data = self._get(sample_href)
+            if sample_data:
+                sample_attrs = (
+                    sample_data.get("data", {}).get("attributes", {})
+                )
+
+        return {
+            "accession":           accession,
+            "pipeline_version":    attrs.get("pipeline-version"),
+            "experiment_type":     attrs.get("experiment-type"),
+            "instrument_model":    attrs.get("instrument-model"),
+            "instrument_platform": attrs.get("instrument-platform"),
+            "latitude":            sample_attrs.get("latitude"),
+            "longitude":           sample_attrs.get("longitude"),
+            "country":             sample_attrs.get("geo-loc-name"),
+            "biome":               sample_attrs.get("biome"),
+            "collection_date":     sample_attrs.get("collection-date"),
+            # Environmental sample data (may be present in metadata entries)
+            "soil_ph":             _safe_float(sample_attrs.get("soil pH")),
+            "temperature_c":       _safe_float(sample_attrs.get("temperature")),
+            "depth_cm":            _safe_float(sample_attrs.get("depth")),
+            "environment_material":sample_attrs.get("environment-material"),
+            "environment_feature": sample_attrs.get("environment-feature"),
+        }
+
+    def get_functional_profile(self, accession: str) -> dict:
+        """
+        Return MetaCyc pathway abundances and KEGG KO abundances for an analysis.
+
+        This is what populates runs.t025_model.  Returns:
+          {
+            "pathways":    {pathway_id: abundance, ...},   # MetaCyc
+            "kegg":        {ko_id: abundance, ...},        # KEGG KO
+            "go_terms":    {go_id: count, ...},            # Gene Ontology
+            "n_pathways":  int,
+            "source":      "mgnify",
+          }
+        """
+        pathways: dict[str, float] = {}
+        kegg:     dict[str, float] = {}
+        go_terms: dict[str, float] = {}
+
+        # MetaCyc / InterPro pathway annotations
+        for endpoint, target in [
+            (f"{MGNIFY_API_BASE}/analyses/{accession}/pathways/metacyc", pathways),
+            (f"{MGNIFY_API_BASE}/analyses/{accession}/pathways/kegg",     kegg),
+            (f"{MGNIFY_API_BASE}/analyses/{accession}/go-terms",           go_terms),
+        ]:
+            data = self._get(endpoint)
+            if not data:
+                continue
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                feat_id = item.get("id") or attrs.get("accession", "unknown")
+                count = attrs.get("count") or attrs.get("abundance", 0)
+                try:
+                    target[feat_id] = float(count)
+                except (TypeError, ValueError):
+                    pass
+
+        return {
+            "pathways":   pathways,
+            "kegg":       kegg,
+            "go_terms":   go_terms,
+            "n_pathways": len(pathways),
+            "source":     "mgnify",
+        }
+
+    def get_taxonomic_profile_structured(self, accession: str) -> dict:
+        """
+        Return phylum_profile and top_genera dicts suitable for the communities table.
+
+        Returns:
+          {
+            "phylum_profile": {phylum: rel_abundance, ...},
+            "top_genera":     [{"name": genus, "rel_abundance": float}, ...],
+          }
+        """
+        raw = self.get_taxonomic_profile(accession)  # lineage -> count
+        if not raw:
+            return {"phylum_profile": {}, "top_genera": []}
+
+        total = sum(raw.values()) or 1.0
+        phylum_totals: dict[str, float] = {}
+        genus_totals:  dict[str, float] = {}
+
+        for lineage, count in raw.items():
+            rel = count / total
+            parts = [p.strip() for p in lineage.split(";")]
+            # parts may be: [domain, phylum, class, order, family, genus, species]
+            if len(parts) >= 2:
+                phylum = parts[1] if parts[1] else "Unknown"
+                phylum_totals[phylum] = phylum_totals.get(phylum, 0.0) + rel
+            if len(parts) >= 6:
+                genus = parts[5] if parts[5] else None
+                if genus:
+                    genus_totals[genus] = genus_totals.get(genus, 0.0) + rel
+
+        # Normalise phyla to relative abundance
+        phylum_sum = sum(phylum_totals.values()) or 1.0
+        phylum_profile = {
+            k: round(v / phylum_sum, 6) for k, v in phylum_totals.items()
+        }
+
+        # Top 50 genera sorted by abundance
+        top_genera = sorted(
+            [{"name": g, "rel_abundance": round(a, 6)} for g, a in genus_totals.items()],
+            key=lambda x: -x["rel_abundance"],
+        )[:50]
+
+        return {
+            "phylum_profile": phylum_profile,
+            "top_genera":     top_genera,
+        }
+
+
+def _safe_float(val: object) -> float | None:
+    try:
+        return float(val)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
