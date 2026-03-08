@@ -28,47 +28,67 @@ logger = logging.getLogger(__name__)
 
 
 def _load_top_interventions(db: SoilDB, top: int) -> list[dict]:
-    """Aggregate all T2 interventions, deduplicate, sort by confidence × effect."""
+    """Aggregate interventions from the interventions table, grouped by type/detail."""
     with db._connect() as conn:
         rows = conn.execute(
             """
-            SELECT r.t2_interventions, r.t2_stability_score, r.t1_target_flux,
-                   s.soil_ph, s.temperature_c, s.latitude, s.longitude, s.site_id
-            FROM runs r
+            SELECT i.intervention_type, i.intervention_detail,
+                   i.predicted_effect, i.confidence, i.cost_estimate,
+                   s.site_id
+            FROM interventions i
+            JOIN runs r ON i.run_id = r.run_id
             JOIN communities c ON r.community_id = c.community_id
             JOIN samples s ON c.sample_id = s.sample_id
-            WHERE r.t2_interventions IS NOT NULL
-            ORDER BY r.t1_target_flux DESC
+            WHERE i.confidence IS NOT NULL
+            ORDER BY (i.confidence * i.predicted_effect) DESC
             """,
         ).fetchall()
 
-    # Tally interventions by name
+    if not rows:
+        return []
+
     tally: dict[str, dict] = {}
-    for interv_json, stability, flux, ph, temp, lat, lon, study_id in rows:
+    for itype, detail_json, effect, confidence, cost_json, site_id in rows:
         try:
-            interventions = json.loads(interv_json)
+            detail = json.loads(detail_json) if detail_json else {}
         except Exception:
-            continue
-        for interv in interventions:
-            name = interv.get("name", "")
-            if not name:
-                continue
-            if name not in tally:
-                tally[name] = {**interv, "n_communities": 0, "sum_score": 0.0, "study_ids": set()}
-            tally[name]["n_communities"] += 1
-            score = float(interv.get("confidence", 0)) * float(interv.get("predicted_effect", 0))
-            tally[name]["sum_score"] += score
-            if study_id:
-                tally[name]["study_ids"].add(study_id)
+            detail = {}
+        name = detail.get("intervention_detail", itype)
+        if name not in tally:
+            tally[name] = {
+                "name": name,
+                "category": itype or "unknown",
+                "confidence": float(confidence or 0),
+                "predicted_effect": float(effect or 0),
+                "sum_score": 0.0,
+                "n_communities": 0,
+                "study_ids": set(),
+                "cost_usd_per_ha": None,
+                "mechanism": detail.get("functional_guild", ""),
+                "caveats": detail.get("caveats", []),
+                "rate": detail.get("rate_t_ha"),
+                "unit": "t/ha" if detail.get("rate_t_ha") else None,
+            }
+        tally[name]["n_communities"] += 1
+        score = float(confidence or 0) * float(effect or 0)
+        tally[name]["sum_score"] += score
+        if site_id:
+            tally[name]["study_ids"].add(site_id)
+        if tally[name]["cost_usd_per_ha"] is None:
+            try:
+                cost = json.loads(cost_json) if cost_json else {}
+                tally[name]["cost_usd_per_ha"] = cost.get("usd_per_ha")
+            except Exception:
+                pass
 
     results = []
     for name, data in tally.items():
         avg_score = data["sum_score"] / max(data["n_communities"], 1)
         results.append({
             "name": name,
-            "category": data.get("category", "unknown"),
-            "confidence": data.get("confidence", 0),
-            "predicted_effect": data.get("predicted_effect", 0),
+            "category": data["category"],
+            "confidence": data["confidence"],
+            "predicted_effect": data["predicted_effect"],
             "composite_score": round(avg_score, 4),
             "n_communities": data["n_communities"],
             "n_studies": len(data["study_ids"]),
