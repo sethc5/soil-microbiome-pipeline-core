@@ -315,6 +315,10 @@ def _process_one_sample(
     r2_trim = workdir / "R2.trimmed.fastq.gz"
     if r2_raw and r2_raw.exists():
         ok = _run_fastp(r1_raw, r2_raw, r1_trim, r2_trim, workdir)
+        if not ok:
+            logger.warning("%s: fastp failed, falling back to untrimmed reads", sample_id)
+            shutil.copy(str(r1_raw), str(r1_trim))
+            shutil.copy(str(r2_raw), str(r2_trim))
     else:
         # single-end fallback
         shutil.copy(str(r1_raw), str(r1_trim))
