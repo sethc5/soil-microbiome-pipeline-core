@@ -52,12 +52,64 @@ def _db_summary(db: SoilDB) -> dict:
     }
 
 
+def _bnf_trajectory_summary(results_dir: Path) -> dict | None:
+    """Load bnf_trajectory_summary.csv and return key stats."""
+    path = results_dir / "bnf_trajectory_summary.csv"
+    if not path.exists():
+        return None
+    import csv
+    from collections import defaultdict
+    records: list[dict] = []
+    with open(path) as fh:
+        for row in csv.DictReader(fh):
+            try:
+                records.append({
+                    "community_id": int(row["community_id"]),
+                    "peak_bnf":    float(row["peak_bnf"]),
+                    "retention":   float(row["retention"]),
+                    "auc":         float(row["auc"]),
+                    "land_use":    row.get("land_use", ""),
+                    "site_id":     row.get("site_id", ""),
+                })
+            except (ValueError, KeyError):
+                pass
+    if not records:
+        return None
+    peaks = [r["peak_bnf"] for r in records]
+    rets  = [r["retention"] for r in records]
+    stable = sum(1 for r in records if r["retention"] >= 0.9)
+    by_land: dict[str, list] = defaultdict(list)
+    for r in records:
+        by_land[r["land_use"] or "unknown"].append(r["peak_bnf"])
+    land_means = {lu: sum(v)/len(v) for lu, v in by_land.items()}
+    top_peak = max(records, key=lambda r: r["peak_bnf"])
+    top_stable = max(records, key=lambda r: r["retention"])
+    return {
+        "n":            len(records),
+        "mean_peak":    sum(peaks) / len(peaks),
+        "max_peak":     max(peaks),
+        "mean_ret":     sum(rets) / len(rets),
+        "pct_stable":   100 * stable / len(records),
+        "land_means":   land_means,
+        "top_peak_cid": top_peak["community_id"],
+        "top_peak_val": top_peak["peak_bnf"],
+        "top_peak_ret": top_peak["retention"],
+        "top_peak_land":top_peak["land_use"],
+        "top_peak_site":top_peak["site_id"],
+        "top_stable_cid": top_stable["community_id"],
+        "top_stable_ret": top_stable["retention"],
+        "top_stable_peak":top_stable["peak_bnf"],
+        "top_stable_site":top_stable["site_id"],
+    }
+
+
 def _render_findings_md(
     config_path: Path,
     db_summary: dict,
     correlation_findings: list,
     enriched_taxa: list,
     results_dir: Path,
+    bnf_traj: dict | None = None,
 ) -> str:
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
@@ -114,6 +166,42 @@ def _render_findings_md(
     else:
         lines.append("- *Taxa enrichment not yet computed. Run `taxa_enrichment.py` first.*")
 
+    # ── BNF Temporal Stability ─────────────────────────────────────────────
+    lines += ["", "## BNF Temporal Stability (dFBA Trajectories)"]
+    if bnf_traj:
+        lines.append(
+            f"- {bnf_traj['n']:,} communities tracked over 30-day dFBA simulations"
+        )
+        lines.append(
+            f"- Mean peak BNF flux: **{bnf_traj['mean_peak']:.4f}** mmol/gDW/h  "
+            f"(max: {bnf_traj['max_peak']:.4f})"
+        )
+        lines.append(
+            f"- Mean retention (day-60 vs day-30): **{bnf_traj['mean_ret']:.1%}**  "
+            f"({bnf_traj['pct_stable']:.1f}% fully stable ≥90%)"
+        )
+        lines.append(
+            f"- Highest peak BNF: community **{bnf_traj['top_peak_cid']}**  "
+            f"(peak={bnf_traj['top_peak_val']:.4f}, retention={bnf_traj['top_peak_ret']:.1%}, "
+            f"site={bnf_traj['top_peak_site']}, land={bnf_traj['top_peak_land']})"
+        )
+        lines.append(
+            f"- Most stable BNF: community **{bnf_traj['top_stable_cid']}**  "
+            f"(retention={bnf_traj['top_stable_ret']:.1%}, peak={bnf_traj['top_stable_peak']:.4f}, "
+            f"site={bnf_traj['top_stable_site']})"
+        )
+        lines.append("- Mean peak BNF by land use:")
+        for lu, mn in sorted(bnf_traj["land_means"].items(), key=lambda x: -x[1]):
+            if lu:
+                lines.append(f"  - {lu}: {mn:.4f}")
+        lines.append(
+            f"_BNF trajectory detail: `results/bnf_trajectory_summary.csv`_"
+        )
+    else:
+        lines.append(
+            "- *Not yet computed. Run `scripts/bnf_trajectory_analysis.py` first.*"
+        )
+
     lines += [
         "",
         "## Caveats",
@@ -153,7 +241,8 @@ def generate(
             row["fold_change"] = float(row.get("fold_change", 0)) if row.get("fold_change") not in ("inf", "Infinity") else float("inf")
             row["significant"] = row.get("significant", "False").lower() == "true"
 
-    md = _render_findings_md(config, db_summary, correlation_findings, enriched_taxa, results_dir)
+    bnf_traj = _bnf_trajectory_summary(results_dir)
+    md = _render_findings_md(config, db_summary, correlation_findings, enriched_taxa, results_dir, bnf_traj)
     output.write_text(md)
     logger.info("FINDINGS.md written → %s", output)
     typer.echo(f"FINDINGS.md → {output}")
