@@ -115,7 +115,7 @@ def _scan_loser_analysis(rows: list[dict]) -> list[dict]:
     losers = [
         r for r in rows
         if r.get("ph") and r.get("latitude") and
-           r.get("t1_target_flux", float("inf")) < median_flux * 0.1
+           (r.get("t1_target_flux") or float("inf")) < median_flux * 0.1
     ]
     if not losers:
         return []
