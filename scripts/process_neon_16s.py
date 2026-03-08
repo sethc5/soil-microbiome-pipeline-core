@@ -63,9 +63,10 @@ PRIMER_FWD = "GTGYCAGCMGCCGCGGTAA"
 PRIMER_REV = "GGACTACNVGGGTWTCTAAT"
 
 # vsearch taxonomy parsing
-VSEARCH_ID  = 0.97   # OTU identity threshold for SILVA search
+VSEARCH_ID   = 0.97   # OTU identity threshold for SILVA search
 TOP_N_GENERA = 10
 TOP_N_PHYLA  = 25
+SUBSAMPLE_N  = 50_000  # reads to classify per sample (for speed with shotgun data)
 
 # ---------------------------------------------------------------------------
 # SILVA taxonomy utilities
@@ -209,60 +210,59 @@ def _run_fastp(r1: Path, r2: Path, out1: Path, out2: Path, workdir: Path) -> boo
         return False
 
 
-def _merge_and_classify(
-    r1_trimmed: Path,
-    r2_trimmed: Path,
+def _subsample_and_classify(
+    r1_raw: Path,
     silva_db: str,
     workdir: Path,
     sample_id: str,
 ) -> Path | None:
     """
-    Merge pairs with vsearch, then classify against SILVA.
-    Returns path to hits TSV or None.
+    Subsample R1 reads to SUBSAMPLE_N, then classify against 16S reference.
+    Works for both amplicon and shotgun metagenomics data.
+    Returns path to hits UC file or None.
     """
-    merged = workdir / "merged.fasta"
-    hits   = workdir / "hits.uc"
-    notmerged = workdir / "notmerged.fasta"
+    subsampled = workdir / "subsample.fasta"
+    hits       = workdir / "hits.uc"
 
-    # Step 1: merge paired reads
-    cmd_merge = [
-        VSEARCH, "--fastq_mergepairs", str(r1_trimmed),
-        "--reverse", str(r2_trimmed),
-        "--fastaout", str(merged),
-        "--fastaout_notmerged_fwd", str(notmerged),
-        "--fastq_minovlen", "10",
-        "--threads", "4",
-        "--quiet",
+    # Step 1: subsample R1 to SUBSAMPLE_N reads (fast, avoids 7M-read vsearch)
+    # vsearch --fastx_subsample handles gzipped FASTQ input
+    cmd_sub = [
+        VSEARCH, "--fastx_subsample", str(r1_raw),
+        "--sample_size", str(SUBSAMPLE_N),
+        "--fastaout", str(subsampled),
+        "--randseed", "42",
     ]
     try:
-        result = subprocess.run(cmd_merge, timeout=600, capture_output=True)
-        if result.returncode != 0 or not merged.exists():
-            # Fall back to R1 only
-            logger.debug("%s: merge failed, using R1 only", sample_id)
-            shutil.copy(str(r1_trimmed), str(merged))
-    except Exception as e:
-        logger.warning("merge failed: %s", e)
-        shutil.copy(str(r1_trimmed), str(merged))
-
-    if not merged.exists() or merged.stat().st_size == 0:
+        result = subprocess.run(cmd_sub, timeout=120, capture_output=True)
+        if result.returncode != 0 or not subsampled.exists() or subsampled.stat().st_size == 0:
+            logger.warning("%s: subsample failed (rc=%d): %s",
+                           sample_id, result.returncode,
+                           result.stderr.decode()[:200])
+            return None
+        n_reads = subsampled.stat().st_size // 200  # rough estimate
+        logger.debug("%s: subsampled ~%dk reads, classifying...", sample_id, n_reads // 1000)
+    except subprocess.TimeoutExpired:
+        logger.warning("%s: subsample timed out", sample_id)
         return None
 
-    # Step 2: classify against 16S reference using UC output format
-    # --notrunclabels: use full reference header (includes taxonomy string)
+    # Step 2: classify subsampled reads against 16S reference
+    # --notrunclabels: use full FASTA header (includes taxonomy lineage)
     # --uc: UC-format output includes full centroid label in column 9
     cmd_class = [
-        VSEARCH, "--usearch_global", str(merged),
+        VSEARCH, "--usearch_global", str(subsampled),
         "--db", silva_db,
         "--id", str(VSEARCH_ID),
         "--uc", str(hits),
         "--notrunclabels",
         "--threads", "4",
-        "--quiet",
         "--maxaccepts", "1",
         "--maxrejects", "32",
     ]
     try:
-        result = subprocess.run(cmd_class, timeout=1800, capture_output=True)
+        result = subprocess.run(cmd_class, timeout=300, capture_output=True)
+        # Clean up large subsampled file
+        if subsampled.exists():
+            subsampled.unlink()
         if result.returncode == 0 and hits.exists():
             return hits
         logger.warning("%s classification stderr: %s",
@@ -290,61 +290,52 @@ def _process_one_sample(
         return None
 
     r1_url = r1_urls[0]
-    r2_url = r2_urls[0] if r2_urls else None
+    # R2 not needed: we subsample R1 directly for taxonomy
 
     workdir = staging_dir / sample_id.replace("/", "_")
     workdir.mkdir(parents=True, exist_ok=True)
 
     r1_raw = workdir / "R1.fastq.gz"
-    r2_raw = workdir / "R2.fastq.gz" if r2_url else None
 
     if dry_run:
         logger.info("[DRY RUN] %s: would download %s + classify", sample_id, r1_url[:60])
         return {"sample_id": sample_id, "skipped": True}
 
-    # --- Download ---
+    # --- Download R1 only ---
     logger.info("%s: downloading R1...", sample_id)
     if not _download_file(r1_url, r1_raw):
         logger.error("%s: R1 download failed", sample_id)
         return None
 
-    if r2_url:
-        logger.info("%s: downloading R2...", sample_id)
-        _download_file(r2_url, r2_raw)
+    # --- Subsample + Classify (no fastp or R2 merge needed) ---
+    hits_file = _subsample_and_classify(r1_raw, silva_db, workdir, sample_id)
 
-    # --- Trim ---
-    r1_trim = workdir / "R1.trimmed.fastq.gz"
-    r2_trim = workdir / "R2.trimmed.fastq.gz"
-    if r2_raw and r2_raw.exists():
-        ok = _run_fastp(r1_raw, r2_raw, r1_trim, r2_trim, workdir)
-        if not ok:
-            logger.warning("%s: fastp failed, falling back to untrimmed reads", sample_id)
-            shutil.copy(str(r1_raw), str(r1_trim))
-            shutil.copy(str(r2_raw), str(r2_trim))
-    else:
-        # single-end fallback
-        shutil.copy(str(r1_raw), str(r1_trim))
-        r2_trim = r1_trim  # dummy
+    # Delete R1 immediately to free disk
+    try:
+        r1_raw.unlink()
+    except Exception:
+        pass
 
-    # --- Classify ---
-    hits_file = _merge_and_classify(r1_trim, r2_trim, silva_db, workdir, sample_id)
     if not hits_file:
         logger.warning("%s: classification failed", sample_id)
+        try:
+            shutil.rmtree(workdir)
+        except Exception:
+            pass
         return None
 
     # --- Parse profiles ---
     phylum_profile, top_genera, shannon = _build_profiles(hits_file)
+
+    # Clean up workdir (hits file included)
+    try:
+        shutil.rmtree(workdir)
+    except Exception:
+        pass
+
     if not phylum_profile:
         logger.warning("%s: empty taxonomy result", sample_id)
         return None
-
-    # --- Cleanup raw files (keep hits for audit) ---
-    for f in [r1_raw, r2_raw, r1_trim, r2_trim]:
-        if f and f.exists() and f != r1_trim:
-            try:
-                f.unlink()
-            except Exception:
-                pass
 
     return {
         "sample_id":      sample_id,
