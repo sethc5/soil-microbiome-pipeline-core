@@ -197,10 +197,12 @@ def _run_fastp(r1: Path, r2: Path, out1: Path, out2: Path, workdir: Path) -> boo
         "--json", str(log_path),
         "--disable_length_filtering",
         "--thread", "2",
-        "--quiet",
+        # --quiet removed: not supported in fastp >= 1.0
     ]
     try:
         result = subprocess.run(cmd, timeout=300, capture_output=True)
+        if result.returncode != 0:
+            logger.warning("fastp error: %s", result.stderr.decode()[:200])
         return result.returncode == 0
     except Exception as e:
         logger.warning("fastp failed: %s", e)
