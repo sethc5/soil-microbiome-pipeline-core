@@ -182,6 +182,10 @@ class NEONAdapter:
                         )
                         yield canonical
 
+    # Table names in DP1.10086.001 that contain actual soil chemistry values
+    _SOIL_CHEM_TABLES = ("soilpH", "soilMoisture", "soilCoreCollection",
+                         "soilChemistry", "sls_soilpH", "sls_soilMoisture")
+
     def get_soil_chemistry(
         self,
         site_code_or_sample_id: str,
@@ -201,7 +205,10 @@ class NEONAdapter:
             return {}
 
         try:
-            rows = self._fetch_sample_table(PRODUCT_SOIL_CHEM, site_code, year_month)
+            rows = self._fetch_sample_table(
+                PRODUCT_SOIL_CHEM, site_code, year_month,
+                table_name_filter=self._SOIL_CHEM_TABLES,
+            )
         except Exception as exc:
             logger.warning(
                 "NEON soil chem unavailable for %s %s: %s", site_code, year_month, exc
@@ -212,30 +219,40 @@ class NEONAdapter:
             return {}
 
         accum: dict[str, list[float]] = defaultdict(list)
+        # Real NEON DP1.10086.001 column names (verified against API 2026-03)
         field_map = {
+            # sls_soilpH.csv
+            "soilInWaterpH":    "soil_ph",
+            "soilInCaClpH":     "soil_ph",
+            # legacy / alternative column forms
             "soilpH":           "soil_ph",
             "pHH2O":            "soil_ph",
+            # sls_soilMoisture.csv
+            "soilMoisture":     "moisture_pct",
+            # sls_soilChemistry.csv (if present)
             "organicCPercent":  "organic_matter_pct",
+            "orgCPercent":      "organic_matter_pct",
             "clayPercent":      "clay_pct",
             "sandPercent":      "sand_pct",
             "siltPercent":      "silt_pct",
+            "bulkDensGHorizon": "bulk_density",
             "bulkDensity":      "bulk_density",
             "totalNitrogen":    "total_nitrogen_ppm",
             "extractableP":     "available_p_ppm",
             "CECbuffer":        "cec",
-            "soilMoisture":     "moisture_pct",
         }
         texture_val: str | None = None
         for row in rows:
             for src_field, dst_field in field_map.items():
                 val = row.get(src_field)
-                if val is None:
+                if val is None or val == "":
                     continue
                 try:
                     accum[dst_field].append(float(val))
                 except (TypeError, ValueError):
                     pass
-            for tex_key in ("textureclss", "textureClass", "texturClassPercent"):
+            for tex_key in ("textureclss", "textureClass", "texturClassPercent",
+                            "biophysicalCriteria"):
                 if row.get(tex_key):
                     texture_val = str(row[tex_key])
                     break
@@ -243,7 +260,7 @@ class NEONAdapter:
         out: dict = {}
         for col, vals in accum.items():
             if vals:
-                out[col] = sum(vals) / len(vals)
+                out[col] = round(sum(vals) / len(vals), 4)
         if texture_val:
             out["soil_texture"] = texture_val
         return out
@@ -378,18 +395,31 @@ class NEONAdapter:
         product_id: str,
         site_code: str,
         year_month: str,
+        table_name_filter: tuple[str, ...] | None = None,
     ) -> list[dict]:
-        """Fetch and parse sample-level CSV rows for a product/site/month."""
+        """Fetch and parse sample-level CSV rows for a product/site/month.
+
+        Parameters
+        ----------
+        table_name_filter : optional tuple of substrings. When provided, only
+            CSV files whose name contains at least one of the substrings are
+            downloaded. Useful to skip unrelated tables (e.g. metagenomics
+            pooling files that share the DP1.10086.001 package).
+        """
         url = f"{NEON_API_BASE}/data/{product_id}/{site_code}/{year_month}"
         package_data = self._get(url)
         files = package_data.get("data", {}).get("files", [])
 
+        exclude_keywords = ("readme", "variables", "validation",
+                            "categoricalcodes", ".xml", ".txt")
         csv_files = [
             f for f in files
             if f.get("name", "").endswith(".csv")
-            and "_readme" not in f.get("name", "").lower()
-            and "_variables" not in f.get("name", "").lower()
-            and "_validation" not in f.get("name", "").lower()
+            and not any(kw in f.get("name", "").lower() for kw in exclude_keywords)
+            and (
+                table_name_filter is None
+                or any(t in f.get("name", "") for t in table_name_filter)
+            )
         ]
         rows: list[dict] = []
         for file_meta in csv_files:
