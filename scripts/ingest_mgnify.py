@@ -5,6 +5,27 @@ MGnify has already run QIIME2 + their functional annotation pipeline on
 500,000+ metagenomes. This script harvests those pre-computed results via
 their REST API — no FASTQ, no QIIME2, no tool installs required.
 
+Running from Hetzner / data-centre IPs:
+  EBI's metagenomics backend silently drops connections from known cloud/DC
+  ASNs (Hetzner AS24940 confirmed). Use --proxy with a SOCKS5 tunnel:
+
+  # Step 1 — on YOUR LOCAL MACHINE, open a SOCKS proxy on port 1080:
+  ssh -D 1080 -N -f localhost
+
+  # Step 2 — forward that port into the server (keep this terminal open):
+  ssh -R 1080:localhost:1080 pipeline    # 'pipeline' SSH alias
+
+  # Step 3 — on the server, run:
+  MGNIFY_PROXY=socks5://localhost:1080 \\
+      python scripts/ingest_mgnify.py --db /data/pipeline/db/soil_microbiome.db
+
+  # Or run locally and ship the results:
+  python scripts/ingest_mgnify.py --dry-run --max-results 20    # test
+  python scripts/ingest_mgnify.py --output-jsonl mgnify_soil.jsonl --max-results 50000
+  scp mgnify_soil.jsonl pipeline:/tmp/
+  ssh pipeline python scripts/ingest_mgnify.py \\
+      --db /data/pipeline/db/soil_microbiome.db --from-jsonl /tmp/mgnify_soil.jsonl
+
 For each analysis it populates:
   - samples table    : geo, environmental metadata per sample
   - communities table: phylum_profile, top_genera (from MGnify taxonomy)
@@ -194,19 +215,83 @@ def parse_args() -> argparse.Namespace:
                    help="Fetch + print without writing to DB")
     p.add_argument("--batch-size",  type=int, default=50,
                    help="Commit to DB every N analyses")
+    p.add_argument("--proxy",       default=None,
+                   help="Proxy URL (e.g. socks5://localhost:1080) for routing "
+                        "around EBI WAF blocks. Also read from MGNIFY_PROXY env.")
+    p.add_argument("--output-jsonl", default=None,
+                   help="Write JSONL records to this file instead of --db "
+                        "(for offline transfer to server).")
+    p.add_argument("--from-jsonl",  default=None,
+                   help="Load JSONL records from file into --db, no API calls.")
     return p.parse_args()
+
+
+def _load_jsonl_to_db(jsonl_path: str, db_path: str) -> None:
+    """Load a --output-jsonl dump produced on another machine into the local DB."""
+    conn = _db_connect(db_path)
+    n = 0
+    with open(jsonl_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                sample = {k: rec.get(k) for k in [
+                    "sample_id", "source", "source_id", "biome", "feature", "material",
+                    "sequencing_type", "latitude", "longitude", "country", "climate_zone",
+                    "soil_ph", "temperature_c", "land_use", "sampling_date",
+                ]}
+                community = {
+                    "sample_id":      rec["sample_id"],
+                    "phylum_profile": rec.get("phylum_profile", {}),
+                    "top_genera":     rec.get("top_genera", []),
+                }
+                run = {
+                    "sample_id":           rec["sample_id"],
+                    "community_id":        None,
+                    "target_id":           rec.get("target_id", "mgnify_soil"),
+                    "t025_model":          rec.get("t025_model"),
+                    "t025_function_score": rec.get("t025_function_score", 0.0),
+                    "t025_n_pathways":     rec.get("t025_n_pathways", 0),
+                    "t025_uncertainty":    rec.get("t025_uncertainty", 0.1),
+                    "machine_id":          os.uname().nodename,
+                }
+                _upsert_sample(conn, sample)
+                cid = _upsert_community(conn, community)
+                run["community_id"] = cid
+                _upsert_run(conn, run)
+                n += 1
+                if n % 500 == 0:
+                    conn.commit()
+                    logger.info("  loaded %d records...", n)
+            except Exception as exc:
+                logger.warning("Skipping line: %s", exc)
+    conn.commit()
+    logger.info("JSONL load complete: %d records", n)
 
 
 def main() -> None:
     args = parse_args()
-    adapter = MGnifyAdapter(config={"mgnify_token": os.environ.get("MGNIFY_TOKEN", "")})
+
+    if args.from_jsonl:
+        _load_jsonl_to_db(args.from_jsonl, args.db)
+        return
+
+    proxy = args.proxy or os.environ.get("MGNIFY_PROXY")
+    config = {"mgnify_token": os.environ.get("MGNIFY_TOKEN", "")}
+    if proxy:
+        config["mgnify_proxy"] = proxy
+    adapter = MGnifyAdapter(config=config)
 
     checkpoint_path = Path(args.checkpoint)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     done: set[str] = _load_checkpoint(checkpoint_path) if args.resume else set()
     logger.info("Checkpoint: %d analyses already done", len(done))
 
-    if not args.dry_run:
+    jsonl_fh = open(args.output_jsonl, "w") if args.output_jsonl else None
+
+    if not args.dry_run and not jsonl_fh:
         conn = _db_connect(args.db)
     else:
         conn = None  # type: ignore[assignment]
@@ -313,6 +398,20 @@ def main() -> None:
             print(f"  phyla          : {list(tax['phylum_profile'].keys())[:5]}")
             print(f"  top_genera     : {[g['name'] for g in tax['top_genera'][:5]]}")
             n_inserted += 1
+        elif jsonl_fh:
+            jsonl_rec = {
+                **sample,
+                "phylum_profile":    json.dumps(community.get("phylum_profile", {})),
+                "top_genera":        json.dumps(community.get("top_genera", [])),
+                "t025_model":        run["t025_model"],
+                "t025_function_score": run["t025_function_score"],
+                "t025_n_pathways":   run["t025_n_pathways"],
+                "t025_uncertainty":  run["t025_uncertainty"],
+                "target_id":         run["target_id"],
+            }
+            jsonl_fh.write(json.dumps(jsonl_rec) + "\n")
+            jsonl_fh.flush()
+            n_inserted += 1
         else:
             batch_buffer.append((sample, community, run))
 
@@ -322,6 +421,10 @@ def main() -> None:
             flush_batch()
 
     flush_batch()  # final partial batch
+
+    if jsonl_fh:
+        jsonl_fh.close()
+        logger.info("JSONL written to %s — transfer to server and load with --from-jsonl", args.output_jsonl)
 
     print(f"\n=== MGnify ingest complete ===")
     print(f"  Ingested : {n_inserted:,}")

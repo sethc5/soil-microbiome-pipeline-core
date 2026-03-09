@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 import logging
+import os
 from typing import Iterator
 
 logger = logging.getLogger(__name__)
@@ -31,9 +32,25 @@ class MGnifyAdapter:
         self.config = config
         self._last_request = 0.0
         self._token = config.get("mgnify_token")  # optional OAuth token
+        # Proxy for routing through a local SOCKS tunnel when running from
+        # a data-centre IP that EBI's WAF silently drops (e.g. Hetzner ASN).
+        # Set via env var:  MGNIFY_PROXY=socks5://localhost:1080
+        # or in config:     mgnify_proxy: socks5://localhost:1080
+        self._proxy = (
+            config.get("mgnify_proxy")
+            or os.environ.get("MGNIFY_PROXY")
+            or os.environ.get("HTTPS_PROXY")
+        )
+        if self._proxy:
+            logger.info("MGnifyAdapter: routing via proxy %s", self._proxy)
 
     def _get(self, url: str, params: dict | None = None) -> dict | None:
-        """Rate-limited GET to MGnify API (uses httpx for TLS compatibility)."""
+        """Rate-limited GET to MGnify API (uses httpx for TLS compatibility).
+
+        If self._proxy is set, all requests are routed through that proxy.
+        Typical use: SOCKS5 reverse tunnel to local machine to bypass
+        data-centre IP blocks on EBI's metagenomics backend.
+        """
         import time
         try:
             import httpx as _httpx
@@ -49,12 +66,19 @@ class MGnifyAdapter:
         if self._token:
             headers["Authorization"] = f"Token {self._token}"
 
+        proxy_kwargs: dict = {}
+        if self._proxy:
+            if _httpx is not None:
+                proxy_kwargs["proxy"] = self._proxy
+            else:
+                proxy_kwargs["proxies"] = {"https": self._proxy, "http": self._proxy}
+
         for attempt in range(3):
             try:
                 if _httpx is not None:
-                    resp = _httpx.get(url, params=params, headers=headers, timeout=90)
+                    resp = _httpx.get(url, params=params, headers=headers, timeout=90, **proxy_kwargs)
                 else:
-                    resp = _requests.get(url, params=params, headers=headers, timeout=90)
+                    resp = _requests.get(url, params=params, headers=headers, timeout=90, **proxy_kwargs)
                 self._last_request = time.monotonic()
                 if resp.status_code == 200:
                     return resp.json()
