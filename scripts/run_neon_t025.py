@@ -102,12 +102,12 @@ def main() -> None:
     logger.info("Starting T0.25 batch for %d communities (workers=%d)...",
                 len(community_ids), args.workers)
 
+    # Note: server pipeline_core has run_t025_batch(config, db, workers, ...)
+    # which auto-queries all t0_pass=1 communities where t025_pass IS NULL.
     result = run_t025_batch(
-        community_ids=community_ids,
         config=config,
         db=db,
         workers=args.workers,
-        receipts_dir=ROOT / "receipts",
     )
 
     logger.info(
