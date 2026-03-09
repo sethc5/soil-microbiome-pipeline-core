@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 NEON_API_BASE = "https://data.neonscience.org/api/v0"
 
 # NEON data product IDs
-PRODUCT_MICROBIOME = "DP1.10107.001"
+PRODUCT_MICROBIOME   = "DP1.10107.001"  # Soil metagenomics (shotgun WGS)
+PRODUCT_MARKER_GENE  = "DP1.10108.001"  # Soil marker gene sequences (16S / ITS)
 PRODUCT_SOIL_CHEM  = "DP1.10086.001"
 
 # Microbiome sample types present in DP1.10107.001

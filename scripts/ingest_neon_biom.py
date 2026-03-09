@@ -1,26 +1,34 @@
 """
 scripts/ingest_neon_biom.py — Ingest NEON soil microbiome sample metadata.
 
-NEON DP1.10107.001 distributes sample metadata as CSV files + raw FASTQ links
-(not pre-processed BIOM files). This script:
+Supports two NEON data products:
 
+  DP1.10107.001 — Soil metagenomics (shotgun WGS)  [default]
+    CSV tables: mms_metagenomeDnaExtraction, mms_metagenomeSequencing,
+                mms_rawDataFiles
+
+  DP1.10108.001 — Soil marker gene sequences (16S / ITS)  [--marker-gene]
+    CSV tables: mmg_soilDnaExtraction, mmg_soilMarkerGeneSequencing_16S,
+                mmg_soilRawDataFiles
+    Direct 16S amplicon FASTQs — far better hit rate for genus classification
+    than the metagenomics product whose URLs are mostly JGI shotgun reads.
+
+Workflow:
   1. Fetches NEON site metadata (lat/lon, biome) via the NEON Data API
   2. Fetches soil chemistry data (DP1.10086.001) per site/month
-  3. Parses mms_metagenomeDnaExtraction CSV -> creates sample records with real geo/env data
-  4. Parses mms_rawDataFiles CSV -> stores FASTQ URLs as notes for future SRA ingest
-  5. Creates placeholder community records (phylum_profile populated after processing)
-  6. Sets t0_pass=0 — pending FASTQ processing by QIIME2/DADA2
-
-Raw FASTQ files for 16S community processing live at:
-  https://storage.neonscience.org/neon-microbial-raw-seq-files/
+  3. Parses extraction CSV -> creates sample records with real geo/env data
+  4. Parses rawDataFiles CSV -> stores FASTQ URLs in communities.notes
+  5. Creates placeholder community records (top_genera populated after processing)
+  6. Sets t0_pass=0 — pending 16S classification by process_neon_16s.py
 
 Usage:
+  # 16S amplicon ingest (recommended — high amplicon URL hit rate)
   python scripts/ingest_neon_biom.py \\
       --db /data/pipeline/db/soil_microbiome.db \\
       --staging /data/pipeline/staging \\
-      --sites HARV ORNL KONZ KONA WOOD CPER SJER TALL OSBS \\
-      --years 2019 2020 2021
+      --marker-gene --all-sites --years 2021 2022 2023 2024
 
+  # Metagenomics ingest (legacy — most URLs are JGI shotgun, skip in 16S pipeline)
   python scripts/ingest_neon_biom.py --db ... --staging ... --all-sites --dry-run
 """
 from __future__ import annotations
@@ -44,7 +52,21 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from adapters.neon_adapter import NEONAdapter, PRODUCT_MICROBIOME
+from adapters.neon_adapter import NEONAdapter, PRODUCT_MICROBIOME, PRODUCT_MARKER_GENE
+
+# Per-product CSV table keyword patterns
+_PRODUCT_CSVKEYS: dict[str, dict[str, str]] = {
+    PRODUCT_MICROBIOME: {
+        "extraction":  "metagenomeDnaExtraction",
+        "sequencing":  "metagenomeSequencing",
+        "raw_files":   "rawDataFiles",
+    },
+    PRODUCT_MARKER_GENE: {
+        "extraction":  "soilDnaExtraction",
+        "sequencing":  "soilMarkerGeneSequencing_16S",
+        "raw_files":   "soilRawDataFiles",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -53,23 +75,30 @@ from adapters.neon_adapter import NEONAdapter, PRODUCT_MICROBIOME
 
 def _fetch_csv(adapter: NEONAdapter, product: str, site: str,
                year_month: str, keyword: str) -> list[dict]:
-    """Download and parse a NEON CSV file identified by keyword in filename."""
+    """Download and parse a NEON CSV file identified by keyword in filename.
+
+    Prefers the 'expanded' package file; falls back to any matching file so
+    that DP1.10108.001 tables present only in the basic package are found too.
+    """
     import requests
     try:
         files = adapter._fetch_file_list(product, site, year_month)
     except Exception as exc:
         logger.warning("  File list failed for %s %s %s: %s", product, site, year_month, exc)
         return []
-    for f in files:
-        name = f.get("name", "")
-        if keyword in name and "expanded" in name:
-            try:
-                r = requests.get(f.get("url", ""), timeout=30)
-                r.raise_for_status()
-                return list(csv.DictReader(io.StringIO(r.text)))
-            except Exception as exc:
-                logger.warning("  Fetch failed for %s: %s", name, exc)
-                return []
+
+    # Prefer expanded-package file; fall back to any match
+    expanded = [f for f in files if keyword in f.get("name", "") and "expanded" in f.get("name", "")]
+    fallback  = [f for f in files if keyword in f.get("name", "") and f not in expanded]
+    candidates = expanded or fallback
+
+    for f in candidates:
+        try:
+            r = requests.get(f.get("url", ""), timeout=30)
+            r.raise_for_status()
+            return list(csv.DictReader(io.StringIO(r.text)))
+        except Exception as exc:
+            logger.warning("  Fetch failed for %s: %s", f.get("name", ""), exc)
     return []
 
 
@@ -97,6 +126,7 @@ def _parse_extraction_rows(rows: list[dict], site_meta: dict, year_month: str) -
             "visit_number":      1,
             "sampling_date":     collect_date[:10] if collect_date else year_month + "-01",
             "sampling_fraction": fraction,
+            "sequencing_type":   "16S",  # overridden by caller for WGS product
         }
 
 
@@ -145,7 +175,7 @@ def _upsert_sample(conn, sample_id: str, meta: dict) -> None:
             available_p_ppm, cec, moisture_pct, soil_texture,
             sampling_fraction, sampling_date
         ) VALUES (
-            :sample_id, 'neon', :source_id, :biome, '16S',
+            :sample_id, 'neon', :source_id, :biome, :sequencing_type,
             :latitude, :longitude, :country, :site_id, :visit_number,
             :soil_ph, :temperature_c, :precipitation_mm, :organic_matter_pct,
             :clay_pct, :sand_pct, :bulk_density, :total_nitrogen_ppm,
@@ -163,6 +193,7 @@ def _upsert_sample(conn, sample_id: str, meta: dict) -> None:
             "sample_id":          sample_id,
             "source_id":          meta.get("source_id", ""),
             "biome":              meta.get("biome", "terrestrial biome"),
+            "sequencing_type":    meta.get("sequencing_type", "16S"),
             "latitude":           meta.get("latitude"),
             "longitude":          meta.get("longitude"),
             "country":            meta.get("country", "USA"),
@@ -233,8 +264,11 @@ def parse_args() -> argparse.Namespace:
                    help="Process all NEON sites with microbiome data")
     p.add_argument("--years",     nargs="+", type=int,
                    help="Restrict to specific years (e.g. 2019 2020 2021)")
-    p.add_argument("--target-id", default="neon_soil_microbiome")
-    p.add_argument("--dry-run",   action="store_true")
+    p.add_argument("--target-id",   default="neon_soil_microbiome")
+    p.add_argument("--marker-gene",  action="store_true",
+                   help="Use DP1.10108.001 (16S/ITS marker gene) instead of DP1.10107.001 (metagenomics). "
+                        "Produces amplicon FASTQs directly usable by process_neon_16s.py.")
+    p.add_argument("--dry-run",      action="store_true")
     return p.parse_args()
 
 
@@ -243,6 +277,11 @@ def main() -> None:
     adapter = NEONAdapter(token=args.token, data_dir=args.staging)
     machine_id = os.uname().nodename
     conn = None if args.dry_run else _db_connect(args.db)
+
+    product   = PRODUCT_MARKER_GENE if args.marker_gene else PRODUCT_MICROBIOME
+    csv_keys  = _PRODUCT_CSVKEYS[product]
+    logger.info("Product: %s (%s)", product,
+                "16S marker gene" if args.marker_gene else "metagenomics/shotgun")
 
     logger.info("Loading NEON site metadata...")
     site_index: dict[str, dict] = {}
@@ -264,7 +303,7 @@ def main() -> None:
         site_meta = site_index.get(site_code, {"site_id": site_code})
 
         try:
-            avail = adapter._get_product_availability(PRODUCT_MICROBIOME, site_code)
+            avail = adapter._get_product_availability(product, site_code)
         except Exception as exc:
             logger.warning("  Availability check failed for %s: %s", site_code, exc)
             continue
@@ -282,15 +321,15 @@ def main() -> None:
                     soil_chem = {}
 
                 extraction_rows = _fetch_csv(
-                    adapter, PRODUCT_MICROBIOME, site_code, year_month,
-                    "metagenomeDnaExtraction"
+                    adapter, product, site_code, year_month,
+                    csv_keys["extraction"]
                 )
                 if not extraction_rows:
                     logger.info("  No extraction rows for %s %s", site_code, year_month)
                     continue
 
-                seq_rows  = _fetch_csv(adapter, PRODUCT_MICROBIOME, site_code, year_month, "metagenomeSequencing")
-                raw_rows  = _fetch_csv(adapter, PRODUCT_MICROBIOME, site_code, year_month, "rawDataFiles")
+                seq_rows  = _fetch_csv(adapter, product, site_code, year_month, csv_keys["sequencing"])
+                raw_rows  = _fetch_csv(adapter, product, site_code, year_month, csv_keys["raw_files"])
                 seq_meta  = _parse_sequencing_rows(seq_rows)
                 fastq_map = _parse_raw_file_rows(raw_rows)
 
@@ -298,6 +337,10 @@ def main() -> None:
                     n_samples += 1
                     dna_id = sample["source_id"]
                     sample.update({k: v for k, v in soil_chem.items() if v is not None})
+                    if args.marker_gene:
+                        sample["sequencing_type"] = "16S"
+                    else:
+                        sample["sequencing_type"] = "WGS"
                     sm = seq_meta.get(dna_id, {})
                     fastq_urls = fastq_map.get(dna_id, [])
 
