@@ -1,7 +1,7 @@
 # Pipeline Status Log
 
-**Last updated**: 2026-03-09  
-**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `563e1e8`  
+**Last updated**: 2026-03-09 (session 2)  
+**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `82de70a`  
 **Server**: `deploy@144.76.222.125` (Hetzner AX41, `/opt/pipeline/`, `/data/pipeline/`)
 
 ---
@@ -12,12 +12,27 @@
 |--------|-------------|---------|-----------|-----------|----------------|
 | **Synthetic** | 440,000 | 440,000 | 440,000 | 20,000 | 20,000 |
 | **NEON** | 9,648 | 3,566 | 3,564 | 0 | 0 |
-| **MGnify (FTP)** | 796 | 796 | 796 | 0 | 0 |
-| **Total** | **450,444** | **444,362** | **444,360** | **20,000** | **20,000** |
+| **MGnify (FTP)** | 95 | 95 | 95 | 0 | 0 |
+| **Total** | **449,743** | **444,101** | **444,099** | **20,000** | **20,000** |
 
-- NEON: 9,346 / 9,648 samples have `soil_ph` populated
-- MGnify: 796 soil communities from EBI amplicon-pipeline-v6 (9 ERP studies), all t0/t025 pass
+- NEON: 9,346 / 9,648 samples have `soil_ph` populated; **0 have genus-level data** (shotgun metagenome product only)
+- MGnify: **95 real soil communities** from 4 ERP studies in `mgnify_results/` old pipeline:
+  - ERP122862, ERP139415, ERP159279, ERP172057 (Acidobacteriota 25–44%, Cyanobacteriota ≈0)
+  - All 95 have genus-level data (avg 18.8 genera/community) ← key improvement
+  - Previous 796 rows were marine (Prochlorococcus-dominated, misclassified) — **purged**
 - Synthetic: 20k communities through full T1+T2 (FBA + dFBA trajectory)
+
+---
+
+## Critical Data Issues Resolved This Session
+
+| Issue | Resolution |
+|-------|-----------|
+| 796 "MGnify" communities were marine (Cyanobacteriota 60–67%) | Purged; fix soil filter |
+| Soil filter was presence-based — admitted marine Planctomycetota | Changed to abundance-based: Acidobacteriota >5% AND Cyanobacteriota <5% |
+| ingest_mgnify_ftp.py only supported v6 amplicon-pipeline FTP tree | Added `--ftp-tree old` for `mgnify_results/` tree (different URL layout) |
+| ERR sub-bucket computed as `err[:6]` — wrong for 10-char accessions | Fixed to `err[:-3]` (e.g. ERR2640150 → ERR2640/) |
+| NEON has 0 genus-level data — shotgun metagenome product | NEON DP1.10108.001 (16S amplicon, 47 sites) identified as path forward |
 
 ---
 
@@ -108,7 +123,7 @@ Bioinoculant is ~30× more cost-effective per unit BNF effect vs. mineral amendm
 |--------|---------|--------|
 | `scripts/ingest_neon_biom.py` | Fetch NEON BIOM/FASTQ, populate samples + communities | ✓ |
 | `scripts/ingest_mgnify.py` | MGnify REST API ingest (requires SOCKS proxy) | Superseded by FTP |
-| `scripts/ingest_mgnify_ftp.py` | **Direct EBI FTP ingest — 796 communities in <2 min** | ✓ Active |
+| `scripts/ingest_mgnify_ftp.py` | **Direct EBI FTP ingest — v6 and old tree, abundance-based soil filter** | ✓ Active |
 | `scripts/ingest_sra.py` | SRA public metagenomes | Available |
 | `adapters/neon_adapter.py` | NEON API adapter | ✓ |
 | `adapters/mgnify_adapter.py` | MGnify REST adapter (proxy-aware) | Available |
@@ -143,37 +158,36 @@ Bioinoculant is ~30× more cost-effective per unit BNF effect vs. mineral amendm
 
 | Gap | Blocker | Impact |
 |-----|---------|--------|
-| T1 FBA for real NEON communities | 16S vsearch gives ~99.9% Unclassified at genus level; need shotgun or ITS | First real metabolic flux values |
-| T1/T2 for MGnify communities | Same — FTP data only has phylum/genus profiles, no genome models | Expand to 796+ real communities |
+| T1 FBA for NEON communities | NEON shotgun product has 0 genera; need DP1.10108.001 (16S amplicon, 47 sites) download + DADA2 | First real metabolic flux values |
+| NEON DP1.10108.001 ingest | Raw FASTQ on SRA (PRJNA393362); need QIIME2/DADA2 pipeline or redbiom lookup for pre-computed OTUs | Genus-level NEON data |
+| T1/T2 for MGnify 95 communities | 95 communities with genus data — need genome-scale models (AGORA2) to run FBA | Expand real-data FBA |
+| More MGnify old-tree studies | 7 studies had `no_SILVA-SSU`; `V6/unknown/` variant found — re-run classifier | Scale to 300+ more communities |
 | AGORA2/MICOM genome-scale models | Not downloaded | Replaces synthetic FBA → HIGH confidence |
-| PICRUSt2 on NEON OTU table | vsearch pipeline outputs phylum profiles, not OTU BIOM | Functional profiling of real communities |
-| NEON BONA site 16S | S3 transfer timeouts on NEON Alaska storage | 2 samples uncovered |
-| More MGnify FTP studies | `mgnify_results/` tree has 27 study groups not yet ingested | Scale from 796 → potentially 5,000+ communities |
-| ENA portal geo metadata | Not fetched (--no-ena-meta flag used) | lat/lon for MGnify communities |
+| PICRUSt2 on MGnify genera | 95 communities ready (avg 18.8 genera) | Functional profiling of real communities |
+| ENA portal geo metadata | Not fetched for MGnify communities | lat/lon for spatial analysis |
 | GTDB-Tk + CheckM annotation | Not started | Raises genome model confidence |
 
 ---
 
-## Recent Commits (HEAD → `563e1e8`)
+## Recent Commits (HEAD → `82de70a`)
 
 ```
+82de70a  fix(ingest): abundance-based soil filter + mgnify_results/ old-tree support
 563e1e8  feat: findings_generator tracks MGnify FTP counts; FINDINGS.md updated
 72853c5  feat: add ingest_mgnify_ftp.py — direct EBI FTP bulk ingest (no API/proxy)
 1121f5b  feat: findings_generator tracks n_real_t025; updates gaps table
 0f85e35  feat: bnf_trajectory_analysis --write-findings writes 5 key findings to DB
 45b7d66  fix: run_t025_batch call uses server signature (config, db, workers)
 45aa181  feat: T0.25 batch runner script for NEON t0_pass samples
-5ea4d1e  feat: MGnify proxy support + JSONL offline-transfer ingest + tunnel script
-c23959e  fix: barcode URL fallback for 16S; update findings confidence/gaps status
-cb57855  Rewrite 16S pipeline: subsample 50K reads, skip R2/fastp/merge
 ```
 
 ---
 
 ## Next Priorities (suggested)
 
-1. **Expand MGnify FTP coverage** — run `ingest_mgnify_ftp.py` against `mgnify_results/` study groups (27 groups, potentially 5k+ runs). Add `--studies` targeting soil-biome studies.
-2. **Add ENA geo metadata** — re-run with `--no-ena-meta` removed to populate lat/lon for 796 MGnify communities.
-3. **T1 FBA path for real data** — options: (a) use MGnify metagenome assemblies via FTP for genus resolution, (b) use SILVA genus-level classification with stricter thresholds, (c) integrate MICOM with AGORA2.
-4. **Download AGORA2 models** — `http://bigg.ucsd.edu/` or AGORA2 Zenodo release; ~500 MB. Enables real genome-scale T1 FBA.
-5. **Run T0.25 on MGnify communities** — already `t025_pass=1` by default; need to re-run ML scorer with actual phylum_profiles.
+1. **NEON 16S amplicon path** — DP1.10108.001 (47 sites), sequences on SRA PRJNA393362. Download via SRA-tools, run DADA2, load OTU table for genus-level resolution → unblocks T1 FBA for real communities.
+2. **Expand MGnify FTP coverage** — re-run `classify_mgnify_studies.py` with ERP115193 etc. (the `no_SILVA-SSU` group, which use `V6/unknown/` path now supported); then ingest confirmed soil studies.
+3. **ENA geo metadata for MGnify** — re-run ingest without `--no-ena-meta` to populate lat/lon for 95 communities.
+4. **Download AGORA2 models** — Zenodo release ~500 MB; enables real genome-scale T1 FBA for MGnify genera.
+5. **PICRUSt2 on MGnify 95** — apply functional inference to the 95 real soil communities.
+
