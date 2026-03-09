@@ -69,24 +69,22 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-FTP_BASE = "https://ftp.ebi.ac.uk/pub/databases/metagenomics/amplicon-pipeline-v6-results/analysis"
-ENA_API  = "https://www.ebi.ac.uk/ena/portal/api"
+FTP_V6_BASE  = "https://ftp.ebi.ac.uk/pub/databases/metagenomics/amplicon-pipeline-v6-results/analysis"
+FTP_OLD_BASE = "https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_results"
+ENA_API      = "https://www.ebi.ac.uk/ena/portal/api"
 
-# Phyla strongly associated with soil (any one of these → accept run)
-# Source: Janssen 2006 (Appl Env Micro), multiple meta-analyses
-SOIL_INDICATOR_PHYLA = {
-    "Acidobacteriota",
-    "Acidobacteria",          # older MGnify naming
-    "Verrucomicrobiota",
-    "Verrucomicrobia",
-    "Gemmatimonadota",
-    "Gemmatimonadetes",
-    "Chloroflexi",
-    "Myxococcota",
-    "Planctomycetota",
-    "Planctomycetes",
-    "Armatimonadota",
-    "Nitrososphaerota",       # AOA — soil archaea
+# ---------------------------------------------------------------------------
+# Soil biome filter — abundance-based (fixes marine false-positives).
+# A community is soil when:
+#   • Acidobacteriota (or old name) exceeds 5 %  ← definitive soil marker
+#   • Cyanobacteriota fraction is below 5 %       ← excludes open-ocean
+# Source: Janssen 2006 (Appl Env Micro), Fierer 2012, Sunagawa 2015
+# ---------------------------------------------------------------------------
+_ACID_PHYLA   = {"Acidobacteriota", "Acidobacteria"}
+_CYANO_PHYLA  = {"Cyanobacteriota", "Cyanobacteria"}
+_MARINE_PHYLA = {
+    "Candidatus_Marinimicrobia", "Nitrospinota",
+    "Kiritimatiellota", "Balneolota", "Rhodothermota",
 }
 
 # Rank prefixes used in the SSU txt file
@@ -210,8 +208,20 @@ def _parse_ssu_txt(content: str) -> tuple[dict[str, float], list[str]]:
 
 
 def _is_soil(phylum_profile: dict[str, float]) -> bool:
-    """Return True if the phylum profile looks like a soil community."""
-    return bool(SOIL_INDICATOR_PHYLA & set(phylum_profile.keys()))
+    """Return True if the phylum profile looks like a soil community.
+
+    Criteria (abundance-based, not presence-based):
+      1. Acidobacteriota fraction > 5 %  — definitive soil marker
+      2. Cyanobacteriota fraction < 5 %  — excludes open-ocean plankton
+      3. No dominant marine-exclusive phyla (combined > 20 %)
+
+    Rationale: presence-only tests admitted marine studies where
+    Planctomycetota / Myxococcota appear at trace levels.
+    """
+    acid   = sum(phylum_profile.get(p, 0.0) for p in _ACID_PHYLA)
+    cyano  = sum(phylum_profile.get(p, 0.0) for p in _CYANO_PHYLA)
+    marine = sum(phylum_profile.get(p, 0.0) for p in _MARINE_PHYLA)
+    return acid > 0.05 and cyano < 0.05 and marine < 0.20
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +391,7 @@ def _process_run(
 
     Returns a record dict ready for DB insertion, or None if skipped.
     """
-    ssu_url = f"{FTP_BASE}/{erp_study}/{err_acc}/taxonomy-summary/SSU/{err_acc}.txt"
+    ssu_url = _ssu_url(erp_study, err_acc)
     content = _get_text(ssu_url, retries=3, timeout=45)
     if not content:
         logger.debug("No SSU content for %s/%s — skipping", erp_study, err_acc)
@@ -426,24 +436,94 @@ def _process_run(
 # Study / run discovery
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# FTP tree abstraction — v6 vs old mgnify_results/
+# ---------------------------------------------------------------------------
+
+# Set at startup from --ftp-tree argument.
+_FTP_TREE: str = "v6"   # "v6" or "old"
+
+
+def _erp_prefix(erp: str) -> str:
+    """e.g.  ERP123456  →  ERP123"""
+    return erp[:6]
+
+
+def _ssu_url(erp: str, err: str) -> str:
+    """Build the full FTP URL for one run's SSU taxonomy text file.
+
+    v6 tree:  .../amplicon-pipeline-v6-results/analysis/{ERP}/{ERR}/taxonomy-summary/SSU/{ERR}.txt
+    old tree: .../mgnify_results/{PREFIX}/{ERP}/{ERR[:-3]}/{ERR}/V6/{type}/taxonomy-summary/SILVA-SSU/{ERR}_SILVA-SSU.txt
+              where {type} is 'amplicon' or 'unknown' depending on study.
+    """
+    if _FTP_TREE == "v6":
+        return f"{FTP_V6_BASE}/{erp}/{err}/taxonomy-summary/SSU/{err}.txt"
+    prefix  = _erp_prefix(erp)
+    # Sub-bucket = accession with last 3 digits dropped
+    # e.g. ERR855787 → ERR855,  ERR2640150 → ERR2640
+    err_sub = err[:-3]
+    base = f"{FTP_OLD_BASE}/{prefix}/{erp}/{err_sub}/{err}/V6"
+    # Try the two known amplicon-type directory names
+    for amp_type in ("amplicon", "unknown"):
+        url = f"{base}/{amp_type}/taxonomy-summary/SILVA-SSU/{err}_SILVA-SSU.txt"
+        probe = _get_text(url, retries=1, timeout=10)
+        if probe:
+            return url
+    # Fallback: let caller handle the None content gracefully
+    return f"{base}/amplicon/taxonomy-summary/SILVA-SSU/{err}_SILVA-SSU.txt"
+
+
 def _discover_studies() -> list[str]:
-    """Return all ERP study accessions found in the v6 FTP analysis directory."""
-    url = f"{FTP_BASE}/"
-    items = _list_ftp_dir(url)
-    studies = [i for i in items if re.match(r"^ERP\d+$", i)]
-    logger.info("Discovered %d ERP studies on FTP: %s", len(studies), studies)
+    """Return all ERP study accessions found in the active FTP tree."""
+    if _FTP_TREE == "v6":
+        url = f"{FTP_V6_BASE}/"
+        items = _list_ftp_dir(url)
+        studies = [i for i in items if re.match(r"^ERP\d+$", i)]
+    else:
+        # Old tree: top-level dirs are prefix buckets (ERP009, ERP104, …)
+        url = f"{FTP_OLD_BASE}/"
+        prefixes = _list_ftp_dir(url)
+        studies = []
+        for pfx in prefixes:
+            if not re.match(r"^ERP\d+$", pfx):
+                continue
+            sub = _list_ftp_dir(f"{FTP_OLD_BASE}/{pfx}/")
+            studies.extend([s for s in sub if re.match(r"^ERP\d+$", s)])
+    logger.info("Discovered %d ERP studies on FTP (%s tree): %s",
+                len(studies), _FTP_TREE, studies)
     return studies
+
+
+def _iter_runs_old(erp: str) -> Iterator[tuple[str, str]]:
+    """Yield (err_acc, erp) pairs for the old mgnify_results/ layout."""
+    prefix = _erp_prefix(erp)
+    study_url = f"{FTP_OLD_BASE}/{prefix}/{erp}/"
+    err_subs = _list_ftp_dir(study_url)           # e.g. ERR855, ERR856 …
+    for err_sub in err_subs:
+        if not re.match(r"^ERR\d+$", err_sub):
+            continue
+        runs = _list_ftp_dir(f"{study_url}{err_sub}/")
+        for err in runs:
+            if re.match(r"^ERR\d+$", err):
+                yield err, erp
 
 
 def _iter_runs(studies: list[str]) -> Iterator[tuple[str, str]]:
     """Yield (err_acc, erp_study) pairs for every ERR directory under each study."""
     for erp in studies:
-        url = f"{FTP_BASE}/{erp}/"
-        runs = _list_ftp_dir(url)
-        err_runs = [r for r in runs if re.match(r"^ERR\d+$", r)]
-        logger.info("  %s: %d runs", erp, len(err_runs))
-        for err in err_runs:
-            yield err, erp
+        if _FTP_TREE == "v6":
+            url = f"{FTP_V6_BASE}/{erp}/"
+            runs = _list_ftp_dir(url)
+            err_runs = [r for r in runs if re.match(r"^ERR\d+$", r)]
+            logger.info("  %s: %d runs", erp, len(err_runs))
+            for err in err_runs:
+                yield err, erp
+        else:
+            count = 0
+            for pair in _iter_runs_old(erp):
+                count += 1
+                yield pair
+            logger.info("  %s: %d runs (old tree)", erp, count)
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +568,11 @@ def parse_args() -> argparse.Namespace:
         help="target_id stored in the runs table.",
     )
     p.add_argument(
+        "--ftp-tree", choices=["v6", "old"], default="v6",
+        help="Which FTP tree to ingest: v6=amplicon-pipeline-v6-results (default), "
+             "old=mgnify_results (older pipeline).",
+    )
+    p.add_argument(
         "--checkpoint", default="results/mgnify_ftp_checkpoint.json",
         help="Path to checkpoint JSON for resumability.",
     )
@@ -516,6 +601,11 @@ def main() -> None:
     else:
         conn = None
         logger.info("DRY-RUN mode — no DB writes")
+
+    # Configure FTP tree
+    global _FTP_TREE
+    _FTP_TREE = args.ftp_tree
+    logger.info("FTP tree: %s", _FTP_TREE)
 
     # Discover studies
     studies = args.studies if args.studies else _discover_studies()
