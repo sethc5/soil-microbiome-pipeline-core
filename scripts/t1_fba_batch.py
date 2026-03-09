@@ -493,35 +493,97 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
 # Database helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_communities(db_path: str, n_max: int) -> list[tuple]:
+# Genera that are known SILVA 16S classification artifacts in soil samples
+# (marine/gut/clinical organisms whose 16S seqs match soil reads in small refs).
+# Communities where these dominate (>80% of genera slots) are excluded in real mode.
+_SILVA_ARTIFACT_GENERA = frozenset({
+    "Planktothrix", "Mesomycoplasma", "Parasaccharibacter", "Leptolyngbya",
+    "Motilimonas", "Limnospira", "Microcoleus", "Schmidleinema",
+})
+
+
+def _fetch_communities(
+    db_path: str,
+    n_max: int,
+    real_mode: bool = False,
+) -> list[tuple]:
     """
-    Load T2-passed communities for T1 modelling.
+    Load communities for T1 modelling.
+
+    real_mode=False (default): load T2-passed synthetic communities.
+    real_mode=True: load real amplicon communities (neon/mgnify) with
+      t0_pass=1 and non-empty genus data, bypassing the t2_pass gate.
 
     Returns list of (community_id, top_genera_json, metadata_json).
-    Sorted by t2_stability_score * t025_function_score descending.
     """
     conn = _db_connect(db_path)
-    rows = conn.execute(
-        """SELECT c.community_id, c.top_genera,
-                  json_object(
-                    'soil_ph',           COALESCE(s.soil_ph, 6.5),
-                    'organic_matter_pct',COALESCE(s.organic_matter_pct, 2.0),
-                    'clay_pct',          COALESCE(s.clay_pct, 25.0),
-                    'temperature_c',     COALESCE(s.temperature_c, 12.0),
-                    'precipitation_mm',  COALESCE(s.precipitation_mm, 600.0)
-                  )
-           FROM runs r
-           JOIN communities c ON r.community_id = c.community_id
-           JOIN samples s ON r.sample_id = s.sample_id
-           WHERE r.t2_pass = 1
-             AND r.t1_pass IS NULL
-             AND c.top_genera IS NOT NULL
-           ORDER BY (COALESCE(r.t2_stability_score, 0) * COALESCE(r.t025_function_score, 0)) DESC
-           LIMIT ?""",
-        (n_max,),
-    ).fetchall()
+    if real_mode:
+        rows = conn.execute(
+            """SELECT c.community_id, c.top_genera,
+                      json_object(
+                        'soil_ph',           COALESCE(s.soil_ph, 6.5),
+                        'organic_matter_pct',COALESCE(s.organic_matter_pct, 2.0),
+                        'clay_pct',          COALESCE(s.clay_pct, 25.0),
+                        'temperature_c',     COALESCE(s.temperature_c, 12.0),
+                        'precipitation_mm',  COALESCE(s.precipitation_mm, 600.0)
+                      )
+               FROM runs r
+               JOIN communities c ON r.community_id = c.community_id
+               JOIN samples s ON r.sample_id = s.sample_id
+               WHERE r.t0_pass = 1
+                 AND r.t1_pass IS NULL
+                 AND s.source IN ('neon', 'mgnify')
+                 AND c.top_genera IS NOT NULL
+                 AND c.top_genera NOT IN ('[]', '{}', 'null', '')
+               ORDER BY s.site_id, s.sampling_date
+               LIMIT ?""",
+            (n_max,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT c.community_id, c.top_genera,
+                      json_object(
+                        'soil_ph',           COALESCE(s.soil_ph, 6.5),
+                        'organic_matter_pct',COALESCE(s.organic_matter_pct, 2.0),
+                        'clay_pct',          COALESCE(s.clay_pct, 25.0),
+                        'temperature_c',     COALESCE(s.temperature_c, 12.0),
+                        'precipitation_mm',  COALESCE(s.precipitation_mm, 600.0)
+                      )
+               FROM runs r
+               JOIN communities c ON r.community_id = c.community_id
+               JOIN samples s ON r.sample_id = s.sample_id
+               WHERE r.t2_pass = 1
+                 AND r.t1_pass IS NULL
+                 AND c.top_genera IS NOT NULL
+               ORDER BY (COALESCE(r.t2_stability_score, 0) * COALESCE(r.t025_function_score, 0)) DESC
+               LIMIT ?""",
+            (n_max,),
+        ).fetchall()
     conn.close()
-    return [(r[0], r[1], r[2]) for r in rows]
+
+    if not real_mode:
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    # In real mode: filter out communities where every genus is a SILVA artifact
+    filtered = []
+    for r in rows:
+        try:
+            genera = json.loads(r[1] or "{}")
+            if isinstance(genera, dict):
+                real_genera = [g for g in genera if g not in _SILVA_ARTIFACT_GENERA
+                               and not g.lstrip('-').replace('.', '').replace('e', '').isdigit()]
+            elif isinstance(genera, list):
+                real_genera = [g if isinstance(g, str) else g.get("name", "")
+                               for g in genera
+                               if (g if isinstance(g, str) else g.get("name", ""))
+                               not in _SILVA_ARTIFACT_GENERA]
+            else:
+                real_genera = []
+            if real_genera:  # at least one non-artifact genus
+                filtered.append((r[0], r[1], r[2]))
+        except Exception:
+            continue
+    return filtered
 
 
 def _write_results(db_path: str, results: list[dict]) -> tuple[int, int]:
@@ -604,6 +666,9 @@ def main(
     model_dir:     Path          = typer.Option(Path("/data/pipeline/models"),           "--model-dir"),
     proteome_dir:  Path          = typer.Option(Path("/data/pipeline/proteome_cache"),   "--proteome-dir"),
     log_path:      Optional[Path] = typer.Option(Path("/var/log/pipeline/t1_fba_batch.log"), "--log"),
+    real_mode:     bool            = typer.Option(False, "--real-mode",
+                                       help="Process t0_pass=1 neon/mgnify amplicon communities "
+                                            "instead of t2_pass=1 synthetic communities"),
 ):
     """Run T1 metabolic modelling: CarveMe model-build → community FBA → keystone."""
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
@@ -626,8 +691,9 @@ def main(
     # Phase A: determine unique genera and build per-genus models
     # ------------------------------------------------------------------
     logger.info("Loading communities from DB ...")
-    communities = _fetch_communities(str(db_path), n_communities)
-    logger.info("Found %d T2-passed communities with t1_pass IS NULL", len(communities))
+    communities = _fetch_communities(str(db_path), n_communities, real_mode=real_mode)
+    mode_label = "real amplicon (neon/mgnify)" if real_mode else "T2-passed synthetic"
+    logger.info("Found %d %s communities with t1_pass IS NULL", len(communities), mode_label)
     if not communities:
         logger.warning("No communities need T1 modelling — nothing to do")
         raise typer.Exit(0)
