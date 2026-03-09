@@ -160,20 +160,115 @@ class MGnifyAdapter:
     def get_taxonomic_profile(self, analysis_accession: str) -> dict:
         """Retrieve OTU/SSU taxonomy summary for an analysis.
 
-        Returns dict of {taxon_name: abundance}.
-        """
-        url = f"{MGNIFY_API_BASE}/analyses/{analysis_accession}/taxonomy"
-        data = self._get(url)
-        if not data:
-            return {}
+        Uses the /taxonomy/ssu endpoint (pipeline v4+).  Falls back to
+        /taxonomy/lsu if SSU returns empty, then bare /taxonomy.
 
-        profile: dict[str, float] = {}
-        for item in data.get("data", []):
-            attrs = item.get("attributes", {})
-            lineage = attrs.get("description", item.get("id", "unknown"))
-            count = attrs.get("count", 0)
-            profile[lineage] = float(count)
-        return profile
+        Returns dict of {lineage_id: count} where lineage_id is the MGnify
+        organism ID string (e.g. 'Bacteria:::Firmicutes:Bacilli').
+        """
+        for suffix in ("ssu", "lsu", ""):
+            path = f"{MGNIFY_API_BASE}/analyses/{analysis_accession}/taxonomy"
+            if suffix:
+                path = f"{path}/{suffix}"
+
+            all_items: list[dict] = []
+            page = 1
+            while True:
+                data = self._get(path, {"page_size": 200, "page": page})
+                if not data:
+                    break
+                items = data.get("data", [])
+                if not items:
+                    break
+                all_items.extend(items)
+                if not data.get("links", {}).get("next"):
+                    break
+                page += 1
+
+            if all_items:
+                profile: dict[str, float] = {}
+                for item in all_items:
+                    attrs = item.get("attributes", {})
+                    lineage = item.get("id", attrs.get("lineage", "unknown"))
+                    count = attrs.get("count", 0)
+                    profile[lineage] = float(count)
+                return profile
+
+        return {}
+
+    def get_taxonomic_profile_structured(self, accession: str) -> dict:
+        """
+        Return phylum_profile and top_genera dicts suitable for the communities table.
+
+        Uses the MGnify SSU taxonomy endpoint which provides a pre-parsed
+        hierarchy dict per organism (no semicolon parsing needed).
+
+        Returns:
+          {
+            "phylum_profile": {phylum: rel_abundance, ...},
+            "top_genera":     [{"name": genus, "rel_abundance": float}, ...],
+          }
+        """
+        phylum_totals: dict[str, float] = {}
+        genus_totals:  dict[str, float] = {}
+        total_count: float = 0.0
+
+        for suffix in ("ssu", "lsu", ""):
+            path = f"{MGNIFY_API_BASE}/analyses/{accession}/taxonomy"
+            if suffix:
+                path = f"{path}/{suffix}"
+
+            page = 1
+            got_any = False
+            while True:
+                data = self._get(path, {"page_size": 200, "page": page})
+                if not data:
+                    break
+                items = data.get("data", [])
+                if not items:
+                    break
+                got_any = True
+                for item in items:
+                    attrs = item.get("attributes", {})
+                    count = float(attrs.get("count", 0))
+                    total_count += count
+                    hierarchy = attrs.get("hierarchy", {})
+                    rank = attrs.get("rank", "")
+
+                    # Use pre-parsed hierarchy fields where available
+                    phylum = (
+                        hierarchy.get("phylum")
+                        or hierarchy.get("division")
+                        or ""
+                    )
+                    genus = hierarchy.get("genus") or ""
+
+                    if phylum:
+                        phylum_totals[phylum] = phylum_totals.get(phylum, 0.0) + count
+                    if genus:
+                        genus_totals[genus] = genus_totals.get(genus, 0.0) + count
+                if not data.get("links", {}).get("next"):
+                    break
+                page += 1
+
+            if got_any:
+                break  # found data at this suffix, don't try next
+
+        if not total_count:
+            return {"phylum_profile": {}, "top_genera": []}
+
+        phylum_profile = {
+            k: round(v / total_count, 6)
+            for k, v in sorted(phylum_totals.items(), key=lambda x: -x[1])
+            if k
+        }
+        top_genera = sorted(
+            [{"name": g, "rel_abundance": round(a / total_count, 6)}
+             for g, a in genus_totals.items() if g],
+            key=lambda x: -x["rel_abundance"],
+        )[:50]
+
+        return {"phylum_profile": phylum_profile, "top_genera": top_genera}
 
     def search_analyses(
         self,
@@ -348,52 +443,6 @@ class MGnifyAdapter:
             "source":     "mgnify",
         }
 
-    def get_taxonomic_profile_structured(self, accession: str) -> dict:
-        """
-        Return phylum_profile and top_genera dicts suitable for the communities table.
-
-        Returns:
-          {
-            "phylum_profile": {phylum: rel_abundance, ...},
-            "top_genera":     [{"name": genus, "rel_abundance": float}, ...],
-          }
-        """
-        raw = self.get_taxonomic_profile(accession)  # lineage -> count
-        if not raw:
-            return {"phylum_profile": {}, "top_genera": []}
-
-        total = sum(raw.values()) or 1.0
-        phylum_totals: dict[str, float] = {}
-        genus_totals:  dict[str, float] = {}
-
-        for lineage, count in raw.items():
-            rel = count / total
-            parts = [p.strip() for p in lineage.split(";")]
-            # parts may be: [domain, phylum, class, order, family, genus, species]
-            if len(parts) >= 2:
-                phylum = parts[1] if parts[1] else "Unknown"
-                phylum_totals[phylum] = phylum_totals.get(phylum, 0.0) + rel
-            if len(parts) >= 6:
-                genus = parts[5] if parts[5] else None
-                if genus:
-                    genus_totals[genus] = genus_totals.get(genus, 0.0) + rel
-
-        # Normalise phyla to relative abundance
-        phylum_sum = sum(phylum_totals.values()) or 1.0
-        phylum_profile = {
-            k: round(v / phylum_sum, 6) for k, v in phylum_totals.items()
-        }
-
-        # Top 50 genera sorted by abundance
-        top_genera = sorted(
-            [{"name": g, "rel_abundance": round(a, 6)} for g, a in genus_totals.items()],
-            key=lambda x: -x["rel_abundance"],
-        )[:50]
-
-        return {
-            "phylum_profile": phylum_profile,
-            "top_genera":     top_genera,
-        }
 
 
 def _safe_float(val: object) -> float | None:
