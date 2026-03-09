@@ -170,15 +170,15 @@ def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
 
 def _download_file(url: str, dest: Path) -> bool:
     """Download a file via curl (handles GCS redirect)."""
-    if dest.exists() and dest.stat().st_size > 1_000:
-        logger.debug("Cache hit: %s", dest.name)
+    if dest.exists() and dest.stat().st_size > 10_000_000:  # >10 MB = likely complete FASTQ
+        logger.debug("Cache hit: %s (%dMB)", dest.name, dest.stat().st_size // 1_000_000)
         return True
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = subprocess.run(
             ["curl", "-fsSL", "--retry", "3", "--retry-delay", "5",
              "-o", str(dest), url],
-            timeout=600, capture_output=True,
+            timeout=900, capture_output=True,
         )
         if result.returncode != 0:
             logger.warning("curl failed for %s: %s", url, result.stderr.decode()[:200])
@@ -210,6 +210,38 @@ def _run_fastp(r1: Path, r2: Path, out1: Path, out2: Path, workdir: Path) -> boo
         return False
 
 
+def _subsample_fastq_to_fasta(fastq_gz: Path, fasta_out: Path,
+                               n: int = SUBSAMPLE_N) -> int:
+    """
+    Stream up to n reads from a (possibly BGZF-format) gzipped FASTQ file
+    and write as FASTA. Returns number of records written.
+
+    Uses Python's gzip module which natively handles concatenated gzip blocks
+    (BGZF format used by NEON GCS), avoiding vsearch's BGZF EOF false-error.
+    """
+    import gzip as _gzip
+    count = 0
+    try:
+        with _gzip.open(fastq_gz, "rt", errors="replace") as fh, \
+             fasta_out.open("w") as out:
+            while count < n:
+                header = fh.readline()
+                if not header:
+                    break
+                seq    = fh.readline().rstrip()
+                fh.readline()   # "+" separator
+                fh.readline()   # quality scores
+                header = header.rstrip()
+                if not header.startswith("@"):
+                    continue   # skip malformed lines
+                out.write(f">{header[1:]}\n{seq}\n")
+                count += 1
+    except Exception as exc:
+        logger.warning("FASTQ→FASTA streaming failed: %s", exc)
+        return 0
+    return count
+
+
 def _subsample_and_classify(
     r1_raw: Path,
     silva_db: str,
@@ -224,26 +256,14 @@ def _subsample_and_classify(
     subsampled = workdir / "subsample.fasta"
     hits       = workdir / "hits.uc"
 
-    # Step 1: subsample R1 to SUBSAMPLE_N reads (fast, avoids 7M-read vsearch)
-    # vsearch --fastx_subsample handles gzipped FASTQ input
-    cmd_sub = [
-        VSEARCH, "--fastx_subsample", str(r1_raw),
-        "--sample_size", str(SUBSAMPLE_N),
-        "--fastaout", str(subsampled),
-        "--randseed", "42",
-    ]
-    try:
-        result = subprocess.run(cmd_sub, timeout=120, capture_output=True)
-        if result.returncode != 0 or not subsampled.exists() or subsampled.stat().st_size == 0:
-            logger.warning("%s: subsample failed (rc=%d): %s",
-                           sample_id, result.returncode,
-                           result.stderr.decode()[:200])
-            return None
-        n_reads = subsampled.stat().st_size // 200  # rough estimate
-        logger.debug("%s: subsampled ~%dk reads, classifying...", sample_id, n_reads // 1000)
-    except subprocess.TimeoutExpired:
-        logger.warning("%s: subsample timed out", sample_id)
+    # Step 1: stream FASTQ → FASTA using Python gzip (handles BGZF natively).
+    # Never over-requests reads, so avoids vsearch's sample_size > file_size error.
+    n_reads = _subsample_fastq_to_fasta(r1_raw, subsampled, SUBSAMPLE_N)
+    if n_reads == 0 or not subsampled.exists() or subsampled.stat().st_size == 0:
+        logger.warning("%s: FASTQ streaming produced empty output", sample_id)
         return None
+    logger.debug("%s: converted %d reads to FASTA (%d bytes)", sample_id,
+                 n_reads, subsampled.stat().st_size)
 
     # Step 2: classify subsampled reads against 16S reference
     # --notrunclabels: use full FASTA header (includes taxonomy lineage)
@@ -273,6 +293,66 @@ def _subsample_and_classify(
         return None
 
 
+# URL prefixes for amplicon libraries (Battelle Memorial Institute contract)
+# vs shotgun metagenome libraries (JGI) — we skip JGI files: they are
+# large (~5–20 GB) whole-genome shotgun FASTQs, unsuitable for 16S taxonomy.
+# Note: JGI marker appears in the DIRECTORY path (JGI_BONA_MMS/), not the
+# filename itself, so we must check the full URL path.
+_AMPLICON_PREFIXES = ("BMI_", "16S", "ITS",)
+
+
+def _prefer_amplicon_r1(fastq_urls: list[str]) -> list[str]:
+    """
+    Select R1 URLs, strongly preferring amplicon (BMI_) over shotgun (JGI_).
+    JGI metagenome files are 5–20 GB and download-timeout; they also contain
+    whole-genome shotgun reads that vsearch 16S classification handles poorly.
+
+    URL pattern: .../neon-microbial-raw-seq-files/{year}/{DIR}/{file}
+    - Shotgun: DIR starts with 'JGI_' (e.g. JGI_BONA_MMS)
+    - Amplicon: DIR starts with 'BMI_' or pool ID, filename has BMI_ prefix
+    """
+    def _is_r1(u: str) -> bool:
+        return "_R1_" in u or "_R1." in u or ".1.fastq" in u
+
+    def _is_r2(u: str) -> bool:
+        return "_R2_" in u or "_R2." in u or ".2.fastq" in u
+
+    def _is_shotgun(u: str) -> bool:
+        # JGI marker is in the directory component, not always the filename
+        # e.g. .../2025/JGI_BONA_MMS/52832.3.CTATCGCA.fastq.gz
+        path_parts = u.split("/")
+        return any(p.startswith("JGI_") for p in path_parts)
+
+    def _is_amplicon(u: str) -> bool:
+        fname = u.rsplit("/", 1)[-1]
+        return any(fname.startswith(p) for p in _AMPLICON_PREFIXES)
+
+    # Exclude JGI shotgun entirely — check the full URL path
+    amplicon_urls = [u for u in fastq_urls if not _is_shotgun(u)]
+    if not amplicon_urls:
+        logger.warning("Only JGI shotgun URLs available — skipping (too large for 16S)")
+        return []
+
+    # Tier 1: BMI amplicon R1
+    t1 = [u for u in amplicon_urls if _is_r1(u) and _is_amplicon(u)]
+    if t1:
+        return t1
+    # Tier 2: BMI amplicon R2 (use if no R1; vsearch classifies both strands)
+    t2 = [u for u in amplicon_urls if _is_r2(u) and _is_amplicon(u)]
+    if t2:
+        logger.debug("Using R2 (no R1 found): %s", t2[0][-60:])
+        return t2
+    # Tier 3: any non-JGI R1
+    t3 = [u for u in amplicon_urls if _is_r1(u)]
+    if t3:
+        return t3
+    # Tier 4: any non-JGI, non-R2
+    t4 = [u for u in amplicon_urls if not _is_r2(u)]
+    if t4:
+        return t4
+    return amplicon_urls
+
+
 def _process_one_sample(
     sample_id: str,
     community_id: int,
@@ -283,13 +363,9 @@ def _process_one_sample(
     target_id: str,
 ) -> dict | None:
     """Full pipeline for one NEON sample. Returns result dict or None on failure."""
-    r1_urls = [u for u in fastq_urls if "_R1_" in u or "_R1." in u or ".1.fastq" in u]
-    # Fallback: barcode-named or single-end files (e.g. AATACCTAAG-TTCTGTAATA.fastq.gz)
+    r1_urls = _prefer_amplicon_r1(fastq_urls)
     if not r1_urls:
-        r1_urls = [u for u in fastq_urls
-                   if "_R2_" not in u and "_R2." not in u and ".2.fastq" not in u]
-    if not r1_urls:
-        logger.warning("%s: no R1 URL found in %s", sample_id, fastq_urls)
+        logger.warning("%s: no suitable R1 URL found in %s", sample_id, fastq_urls)
         return None
 
     r1_url = r1_urls[0]
