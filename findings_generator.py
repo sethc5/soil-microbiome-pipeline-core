@@ -50,6 +50,7 @@ def _db_summary(db: SoilDB) -> dict:
             by_source[src] = cnt
         n_real = by_source.get("neon", 0) + by_source.get("mgnify", 0) + by_source.get("sra", 0)
         n_neon = by_source.get("neon", 0)
+        n_mgnify = by_source.get("mgnify", 0)
         n_real_t0 = conn.execute(
             """SELECT COUNT(*) FROM runs r JOIN samples s ON r.sample_id=s.sample_id
                WHERE r.t0_pass=1 AND s.source != 'synthetic'"""
@@ -57,6 +58,10 @@ def _db_summary(db: SoilDB) -> dict:
         n_real_t025 = conn.execute(
             """SELECT COUNT(*) FROM runs r JOIN samples s ON r.sample_id=s.sample_id
                WHERE r.t025_pass=1 AND s.source != 'synthetic'"""
+        ).fetchone()[0]
+        n_mgnify_t0 = conn.execute(
+            """SELECT COUNT(*) FROM runs r JOIN samples s ON r.sample_id=s.sample_id
+               WHERE r.t0_pass=1 AND s.source='mgnify'"""
         ).fetchone()[0]
         n_soil_ph = conn.execute(
             """SELECT COUNT(*) FROM samples
@@ -74,6 +79,8 @@ def _db_summary(db: SoilDB) -> dict:
         "n_neon": n_neon,
         "n_real_t0": n_real_t0,
         "n_real_t025": n_real_t025,
+        "n_mgnify": n_mgnify,
+        "n_mgnify_t0": n_mgnify_t0,
         "n_soil_ph": n_soil_ph,
     }
 
@@ -418,6 +425,8 @@ def _render_findings_md(
     n_neon = db_summary.get("n_neon", 0)
     n_real_t0 = db_summary.get("n_real_t0", 0)
     n_real_t025 = db_summary.get("n_real_t025", 0)
+    n_mgnify = db_summary.get("n_mgnify", 0)
+    n_mgnify_t0 = db_summary.get("n_mgnify_t0", 0)
     n_soil_ph = db_summary.get("n_soil_ph", 0)
     n_synthetic_t1 = db_summary.get("n_completed_t1", 0)
     by_source = db_summary.get("by_source", {})
@@ -480,6 +489,10 @@ def _render_findings_md(
             + ("✓" if n_real_t0 > 100 else "⏳ awaiting vsearch/SILVA"),
         f"- **NEON T0.25 scored**: {n_real_t025:,} / {n_real_t0:,} T0-pass communities "
             + ("✓" if n_real_t025 > 100 else "⏳ pending"),
+        f"- **MGnify FTP ingested**: {n_mgnify:,} soil communities (EBI amplicon-pipeline-v6) "
+            + ("✓" if n_mgnify > 100 else "⏳ pending"),
+        f"- **MGnify T0-pass**: {n_mgnify_t0:,} / {n_mgnify:,} "
+            + ("✓" if n_mgnify_t0 > 100 else "⏳ pending"),
         f"- **SRA tools**: installed (v3.x) ✓",
         f"- **PICRUSt2**: installed (v2.6.3) ✓",
         f"- **vsearch**: installed (v2.30.x) ✓",
@@ -492,7 +505,7 @@ def _render_findings_md(
         f"| PICRUSt2 functional profiling on NEON OTUs | N/A — vsearch 16S pipeline outputs phylum profiles, not OTU BIOM tables | Would require pipeline restructuring |",
         "| T1 FBA for real NEON T0-pass communities | Not started — needs genus-level assignments (shotgun 16S gives ~99.9% Unclassified) | First real metabolic flux predictions |",
         "| Real genome-scale models (AGORA2/MICOM) | Not started | Replaces synthetic FBA → raises to HIGH |",
-        "| MGnify API ingest | Blocked — Hetzner ASN IP filter (EBI WAF) | +50k curated metagenome samples |",
+        f"| MGnify FTP ingest (v6 amplicon) | {'✓ Complete — ' + str(n_mgnify) + ' soil communities via ftp.ebi.ac.uk (no proxy needed)' if n_mgnify > 100 else '⏳ running — direct EBI FTP, no WAF block'} | Real 16S phylum profiles from curated EBI pipeline |",
         "| GTDB-Tk + CheckM genome annotation | Not started | Raises model confidence to medium/high |",
         "",
         "### Path to high-value output",
