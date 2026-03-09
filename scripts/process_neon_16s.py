@@ -283,8 +283,11 @@ def _process_one_sample(
     target_id: str,
 ) -> dict | None:
     """Full pipeline for one NEON sample. Returns result dict or None on failure."""
-    r1_urls = [u for u in fastq_urls if "_R1" in u or ".1.fastq" in u]
-    r2_urls = [u for u in fastq_urls if "_R2" in u or ".2.fastq" in u]
+    r1_urls = [u for u in fastq_urls if "_R1_" in u or "_R1." in u or ".1.fastq" in u]
+    # Fallback: barcode-named or single-end files (e.g. AATACCTAAG-TTCTGTAATA.fastq.gz)
+    if not r1_urls:
+        r1_urls = [u for u in fastq_urls
+                   if "_R2_" not in u and "_R2." not in u and ".2.fastq" not in u]
     if not r1_urls:
         logger.warning("%s: no R1 URL found in %s", sample_id, fastq_urls)
         return None

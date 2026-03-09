@@ -429,10 +429,21 @@ def _render_findings_md(
         overall_conf = "LOW"
         conf_note = "Only synthetic data in pipeline; no real community profiles."
 
+    def _source_conf(src: str, cnt: int) -> str:
+        if src == "synthetic":
+            return "LOW — placeholder genomes"
+        if src == "neon":
+            if n_real_t0 > 100:
+                return "MEDIUM — real metadata + 16S phylum profiles classified"
+            elif n_soil_ph > 100:
+                return "LOW-MEDIUM — real metadata, 16S classification in progress"
+            return "LOW — ingested, classification pending"
+        return "MEDIUM"
+
     source_lines = [
         f"| {src.upper() if src != 'synthetic' else 'Synthetic'} "
         f"| {cnt:,} "
-        f"| {'LOW — placeholder genomes' if src == 'synthetic' else 'MEDIUM — real metadata, 16S pending' if src == 'neon' else 'MEDIUM'} |"
+        f"| {_source_conf(src, cnt)} |"
         for src, cnt in sorted(by_source.items())
     ]
 
@@ -459,7 +470,7 @@ def _render_findings_md(
         f"- **NEON samples ingested**: {n_neon:,} across 20 field sites",
         f"- **NEON soil pH populated**: {n_soil_ph:,} / {n_neon:,} samples "
             + ("✓" if n_soil_ph > 100 else "⏳ in progress"),
-        f"- **NEON T0-pass (16S classified)**: {n_real_t0:,} "
+        f"- **NEON T0-pass (16S classified)**: {n_real_t0:,} / {n_neon:,} "
             + ("✓" if n_real_t0 > 100 else "⏳ awaiting vsearch/SILVA"),
         f"- **SRA tools**: installed (v3.x) ✓",
         f"- **PICRUSt2**: installed (v2.6.3) ✓",
@@ -468,10 +479,11 @@ def _render_findings_md(
         "### Remaining gaps to high-value production",
         "| Gap | Status | Impact |",
         "|-----|--------|--------|",
-        "| NEON 16S classification (vsearch+SILVA) | ⏳ running | Real phylum profiles → genuine FBA inputs |",
-        "| PICRUSt2 functional profiling on NEON OTUs | ⏳ blocked on T0 | Fills t025_model → unblocks T0.25 ML |",
+        f"| NEON 16S classification (vsearch+SILVA) | {'✓ Complete — ' + str(n_real_t0) + '/' + str(n_neon) + ' samples' if n_real_t0 > 100 else '⏳ running'} | Real phylum profiles → genuine FBA inputs |",
+        f"| PICRUSt2 functional profiling on NEON OTUs | {'⏳ ready to run — ' + str(n_real_t0) + ' T0-pass samples queued' if n_real_t0 > 100 else '⏳ blocked on T0'} | Fills t025_model → unblocks T0.25 ML |",
+        "| T1 FBA for real NEON T0-pass communities | Not started | First real metabolic flux predictions |",
         "| Real genome-scale models (AGORA2/MICOM) | Not started | Replaces synthetic FBA → raises to HIGH |",
-        "| MGnify API (EBI) ingest | Blocked — EBI outage | +50k curated metagenome samples |",
+        "| MGnify API ingest | Blocked — Hetzner ASN IP filter (EBI WAF) | +50k curated metagenome samples |",
         "| GTDB-Tk + CheckM genome annotation | Not started | Raises model confidence to medium/high |",
         "",
         "### Path to high-value output",
