@@ -54,6 +54,10 @@ def _db_summary(db: SoilDB) -> dict:
             """SELECT COUNT(*) FROM runs r JOIN samples s ON r.sample_id=s.sample_id
                WHERE r.t0_pass=1 AND s.source != 'synthetic'"""
         ).fetchone()[0]
+        n_real_t025 = conn.execute(
+            """SELECT COUNT(*) FROM runs r JOIN samples s ON r.sample_id=s.sample_id
+               WHERE r.t025_pass=1 AND s.source != 'synthetic'"""
+        ).fetchone()[0]
         n_soil_ph = conn.execute(
             """SELECT COUNT(*) FROM samples
                WHERE source='neon' AND soil_ph IS NOT NULL"""
@@ -69,6 +73,7 @@ def _db_summary(db: SoilDB) -> dict:
         "n_real": n_real,
         "n_neon": n_neon,
         "n_real_t0": n_real_t0,
+        "n_real_t025": n_real_t025,
         "n_soil_ph": n_soil_ph,
     }
 
@@ -412,6 +417,7 @@ def _render_findings_md(
     # --- Data Confidence section (dynamically reflects real-data progress) ---
     n_neon = db_summary.get("n_neon", 0)
     n_real_t0 = db_summary.get("n_real_t0", 0)
+    n_real_t025 = db_summary.get("n_real_t025", 0)
     n_soil_ph = db_summary.get("n_soil_ph", 0)
     n_synthetic_t1 = db_summary.get("n_completed_t1", 0)
     by_source = db_summary.get("by_source", {})
@@ -472,6 +478,8 @@ def _render_findings_md(
             + ("✓" if n_soil_ph > 100 else "⏳ in progress"),
         f"- **NEON T0-pass (16S classified)**: {n_real_t0:,} / {n_neon:,} "
             + ("✓" if n_real_t0 > 100 else "⏳ awaiting vsearch/SILVA"),
+        f"- **NEON T0.25 scored**: {n_real_t025:,} / {n_real_t0:,} T0-pass communities "
+            + ("✓" if n_real_t025 > 100 else "⏳ pending"),
         f"- **SRA tools**: installed (v3.x) ✓",
         f"- **PICRUSt2**: installed (v2.6.3) ✓",
         f"- **vsearch**: installed (v2.30.x) ✓",
@@ -480,8 +488,9 @@ def _render_findings_md(
         "| Gap | Status | Impact |",
         "|-----|--------|--------|",
         f"| NEON 16S classification (vsearch+SILVA) | {'✓ Complete — ' + str(n_real_t0) + '/' + str(n_neon) + ' samples' if n_real_t0 > 100 else '⏳ running'} | Real phylum profiles → genuine FBA inputs |",
-        f"| PICRUSt2 functional profiling on NEON OTUs | {'⏳ ready to run — ' + str(n_real_t0) + ' T0-pass samples queued' if n_real_t0 > 100 else '⏳ blocked on T0'} | Fills t025_model → unblocks T0.25 ML |",
-        "| T1 FBA for real NEON T0-pass communities | Not started | First real metabolic flux predictions |",
+        f"| NEON T0.25 ML scoring | {'✓ Complete — ' + str(n_real_t025) + '/' + str(n_real_t0) + ' T0-pass communities scored' if n_real_t025 > 100 else '⏳ pending T0'} | function_score computed for all T0-pass NEON communities |",
+        f"| PICRUSt2 functional profiling on NEON OTUs | N/A — vsearch 16S pipeline outputs phylum profiles, not OTU BIOM tables | Would require pipeline restructuring |",
+        "| T1 FBA for real NEON T0-pass communities | Not started — needs genus-level assignments (shotgun 16S gives ~99.9% Unclassified) | First real metabolic flux predictions |",
         "| Real genome-scale models (AGORA2/MICOM) | Not started | Replaces synthetic FBA → raises to HIGH |",
         "| MGnify API ingest | Blocked — Hetzner ASN IP filter (EBI WAF) | +50k curated metagenome samples |",
         "| GTDB-Tk + CheckM genome annotation | Not started | Raises model confidence to medium/high |",
