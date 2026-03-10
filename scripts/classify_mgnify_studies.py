@@ -115,38 +115,39 @@ def classify_study(erp, prefix):
     return erp, err, phyla
 
 
-print(f"{'ERP':<12} {'TAG':<8} {'ERR':<16} {'soil':>6} {'marine':>6}  top_phyla")
-print("-" * 90)
+if __name__ == "__main__":
+    print(f"{'ERP':<12} {'TAG':<8} {'ERR':<16} {'soil':>6} {'marine':>6}  top_phyla")
+    print("-" * 90)
 
-soil_studies = []
+    soil_studies = []
 
-for erp, prefix in STUDY_PREFIXES.items():
-    erp_id, err_or_msg, phyla = classify_study(erp, prefix)
+    for erp, prefix in STUDY_PREFIXES.items():
+        erp_id, err_or_msg, phyla = classify_study(erp, prefix)
 
-    if not phyla:
-        print(f"{erp:<12} {'UNKNOWN':<8} {err_or_msg:<16}")
+        if not phyla:
+            print(f"{erp:<12} {'UNKNOWN':<8} {err_or_msg:<16}")
+            time.sleep(0.3)
+            continue
+
+        soil_score   = sum(phyla.get(p, 0) for p in SOIL_PHYLA)
+        marine_score = sum(phyla.get(p, 0) for p in MARINE_PHYLA)
+        top = sorted(phyla.items(), key=lambda x: -x[1])[:3]
+        top_str = ", ".join(f"{p}={v:.2f}" for p, v in top)
+
+        if soil_score > 0.05 and marine_score < 0.15:
+            tag = "SOIL"
+            soil_studies.append(erp)
+        elif soil_score > 0.02 and marine_score < 0.2:
+            tag = "SOIL?"
+            soil_studies.append(erp)
+        elif marine_score > 0.3:
+            tag = "MARINE"
+        else:
+            tag = "OTHER"
+
+        print(f"{erp:<12} {tag:<8} {err_or_msg:<16} {soil_score:>6.3f} {marine_score:>6.3f}  {top_str}")
         time.sleep(0.3)
-        continue
 
-    soil_score   = sum(phyla.get(p, 0) for p in SOIL_PHYLA)
-    marine_score = sum(phyla.get(p, 0) for p in MARINE_PHYLA)
-    top = sorted(phyla.items(), key=lambda x: -x[1])[:3]
-    top_str = ", ".join(f"{p}={v:.2f}" for p, v in top)
-
-    if soil_score > 0.05 and marine_score < 0.15:
-        tag = "SOIL"
-        soil_studies.append(erp)
-    elif soil_score > 0.02 and marine_score < 0.2:
-        tag = "SOIL?"
-        soil_studies.append(erp)
-    elif marine_score > 0.3:
-        tag = "MARINE"
-    else:
-        tag = "OTHER"
-
-    print(f"{erp:<12} {tag:<8} {err_or_msg:<16} {soil_score:>6.3f} {marine_score:>6.3f}  {top_str}")
-    time.sleep(0.3)
-
-print()
-print("=" * 90)
-print(f"Soil/likely-soil studies ({len(soil_studies)}): {soil_studies}")
+    print()
+    print("=" * 90)
+    print(f"Soil/likely-soil studies ({len(soil_studies)}): {soil_studies}")
