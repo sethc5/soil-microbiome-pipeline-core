@@ -2,7 +2,7 @@
 
 **Last updated**: 2026-03-09 (session 2)  
 **Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `82de70a`  
-**Server**: `deploy@144.76.222.125` (Hetzner AX41, `/opt/pipeline/`, `/data/pipeline/`)
+**Server**: `deploy@<HETZNER2_HOST>` (Hetzner AX41, `/opt/pipeline/`, `/data/pipeline/`)
 
 ---
 

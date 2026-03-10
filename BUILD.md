@@ -2,7 +2,7 @@
 ## soil-microbiome-pipeline-core → nitrogen-fixation-pipeline (first instantiation)
 
 **Written:** 2026-03-06  
-**Server:** hetzner2 · 144.76.222.125 · Xeon W-2295 36c/252GB · Ubuntu 24.04  
+**Server:** hetzner2 · `$HETZNER2_HOST` · Xeon W-2295 36c/252GB · Ubuntu 24.04  
 **Repo commit at planning:** `b557dee`
 
 ---

@@ -10,7 +10,7 @@
 #   bash scripts/provision_server.sh [HOST] [KEY]
 #
 # Defaults:
-#   HOST = 144.76.222.125
+#   HOST = $HETZNER2_HOST  (set in .env or pass as first arg)
 #   KEY  = ~/.ssh/id_ed25519_personal
 #
 # What this script does (in order):
@@ -39,7 +39,7 @@ if [ -f "$ENV_FILE" ]; then
   set -a; source "$ENV_FILE"; set +a
 fi
 
-HOST="${1:-${HETZNER2_HOST:-144.76.222.125}}"
+HOST="${1:-${HETZNER2_HOST:?'Set HETZNER2_HOST in .env or pass HOST as first arg'}}"
 KEY="${2:-${HETZNER2_KEY:-$HOME/.ssh/id_ed25519_personal}}"
 
 SSH_ROOT="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i $KEY root@$HOST"
