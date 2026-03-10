@@ -227,7 +227,7 @@ flowchart TB
         U1A["MAG BINNING\nMetaBat2/SemiBin · CheckM\nper-sample genome bins"]:::unit
         U1B["GENOME ANNOTATOR\nDRAM/Prokka → KEGG + MetaCyc\nnifH · nifD · nifK per bin"]:::unit
         U1C["MODEL SYNTHESIZER\nCarveMe genome-scale SBML\nMo-nitrogenase from annotation"]:::unit
-        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium\nbiomass objective · shared pool"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective"]:::unit
         U1E["FVA ANALYZER\nNITROGENASE_MO · 90% growth"]:::unit
         U1F["METABOLIC EXCHANGE MAP\ncross-feeding network analysis\nN/C/energy coupling per pair\nidentify syntrophic keystones\nADDITION D"]:::add
         S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
@@ -299,7 +299,7 @@ flowchart TB
 | **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML, 20 genera on disk | CarveMe requires shotgun MAGs; genus-level proxy loses strain variation |
 | **T1 nitrogenase** | Present from annotation-driven model build | Patched into 9 genera via patch_diazotroph_models.py | AGORA2 template omits nitrogenase; not a catalogued AGORA2 reaction |
 | **T1 medium** | N-limited minimal medium from the start | 3 iterations to reach correct medium (commits 90f0e92 → 13ee41d → ad31e7b) | AGORA2 ships with complete medium; LP saturation and ATP-unbounded FVA not obvious until empirically observed |
-| **T1 results** | ~2,000 high-confidence metabolic hits | 4,686 real t1_pass (3,845 BNF avg 44.5 mmol NH4/gDW/h + 1,113 non-BNF) | Flux at glucose ceiling; max 108 in multi-diazotroph communities needs monitoring |
+| **T1 results** | ~2,000 high-confidence metabolic hits | 4,686 real t1_pass (3,845 BNF + 1,113 non-BNF) — **T1 RERUN PENDING** after metabolite-ns fix | Inflated avg 44.5 / max 108 mmol/gDW/h due to shared intracellular pools; fix committed ea2257f; rerun in progress (PID 573613) — expect max ≤45 on completion |
 | **T2 real** | Run after T1 completes | Synthetic only (20k); real blocked until T1 BNF values stabilised | Needed stable T1 baseline before running expensive dFBA |
 | **T2 intervention** | Full bioinoculant + amendment screen | Not implemented | Scripts exist but not wired into BNF config; downstream of T2 real |
 | **Output** | Ranked communities + intervention report + field package | 4,686 t1_pass in DB; FINDINGS.md server-local; no report or field package | Blocked: report requires T2 intervention data |
