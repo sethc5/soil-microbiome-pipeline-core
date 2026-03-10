@@ -217,7 +217,12 @@ def _apply_bnf_minimal_medium(community: Any) -> None:
         if base_id in _BNF_COFACTOR_EXCHANGES:
             rxn.lower_bound = _BNF_COFACTOR_UPTAKE_BOUND
 
-    # Step 3: open first available primary carbon source at ≤10 mmol/gDW/h
+    # Step 3: open first available primary carbon source at ≤10 mmol/gDW/h.
+    # IMPORTANT: open the single community-level exchange (rxn.id == c_id) if
+    # present; otherwise open only the FIRST per-organism variant found.  Do NOT
+    # open all per-organism variants — each starts with (c_id + "__org") and
+    # opening all N of them multiplies the effective carbon budget by N, inflating
+    # NITROGENASE_MO FVA proportionally (the per-organism-stack bug).
     carbon_opened = False
     for c_id in _BNF_PREFERRED_CARBON_SOURCES:
         if carbon_opened:
@@ -226,6 +231,7 @@ def _apply_bnf_minimal_medium(community: Any) -> None:
             if rxn.id == c_id or rxn.id.startswith(c_id + "__org"):
                 rxn.lower_bound = _BNF_CARBON_UPTAKE_BOUND
                 carbon_opened = True
+                break  # open exactly one exchange; prevents N-organism glucose stacking
 
     if not carbon_opened:
         # Fallback: use the first carbon-containing exchange that was open
