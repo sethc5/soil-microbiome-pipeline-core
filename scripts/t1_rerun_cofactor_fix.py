@@ -20,7 +20,7 @@ Usage (on server):
     cd /opt/pipeline
     .venv/bin/python scripts/t1_rerun_cofactor_fix.py \\
         --db /data/pipeline/db/soil_microbiome.db \\
-        --model-dir /opt/pipeline/models \\
+        --model-dir /data/pipeline/models \\
         --workers 32
 """
 from __future__ import annotations
@@ -164,7 +164,7 @@ def _write_rerun_results(db_path: str, results: list[dict]) -> tuple[int, int]:
 @app.command()
 def main(
     db: str = typer.Option(..., help="Path to SQLite database"),
-    model_dir: str = typer.Option("/opt/pipeline/models", help="Directory with SBML genus models"),
+    model_dir: str = typer.Option("/data/pipeline/models", help="Directory with SBML genus models"),
     workers: int = typer.Option(32, help="Number of parallel worker processes"),
     batch_size: int = typer.Option(50, help="Communities per worker batch"),
     dry_run: bool = typer.Option(False, help="Query and report count only, don't rerun"),
