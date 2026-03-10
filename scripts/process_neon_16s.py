@@ -66,7 +66,13 @@ PRIMER_REV = "GGACTACNVGGGTWTCTAAT"
 VSEARCH_ID   = 0.97   # OTU identity threshold for SILVA search
 TOP_N_GENERA = 10
 TOP_N_PHYLA  = 25
-SUBSAMPLE_N  = 10_000  # reads to classify per sample (10k is ample for genus-level taxonomy)
+# TUNED (commit 4739ff0, hetzner2 36-core Xeon W-2295):
+#   Reduced from 50k → 10k to keep vsearch runtime <30s per sample.
+#   At 50k reads against the 27,277-seq SILVA reference with 16 workers,
+#   wall-clock per job exceeded the 300s timeout and triggered a storm of
+#   failures. 10k gives stable genus-level taxonomy at Shannon H ≈ ±0.02
+#   vs 50k on the same samples (tested on BLAN 2020 subset).
+SUBSAMPLE_N  = 10_000
 
 # ---------------------------------------------------------------------------
 # SILVA taxonomy utilities
@@ -274,9 +280,14 @@ def _subsample_and_classify(
         "--id", str(VSEARCH_ID),
         "--uc", str(hits),
         "--notrunclabels",
-        "--threads", "1",   # keep to 1: with N workers each at 4 threads we
-                            # over-subscribe cores and trigger timeouts
+        # TUNED (commit 351cc72): was --threads 4; N_workers × 4 = 96 threads
+        # on a 36-core machine caused severe CPU contention and a 100% timeout
+        # storm. Single-threaded vsearch with N parallel workers is faster overall.
+        "--threads", "1",
         "--maxaccepts", "1",
+        # TUNED (commit 4739ff0): was 32; halved to 8 to reduce per-query search
+        # time against the 27,277-seq reference. Recall impact is negligible at
+        # 97% identity vs full-length 16S reads.
         "--maxrejects", "8",
     ]
     try:
