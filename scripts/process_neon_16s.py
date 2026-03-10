@@ -274,7 +274,8 @@ def _subsample_and_classify(
         "--id", str(VSEARCH_ID),
         "--uc", str(hits),
         "--notrunclabels",
-        "--threads", "4",
+        "--threads", "1",   # keep to 1: with N workers each at 4 threads we
+                            # over-subscribe cores and trigger timeouts
         "--maxaccepts", "1",
         "--maxrejects", "32",
     ]
