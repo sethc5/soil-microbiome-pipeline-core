@@ -66,7 +66,7 @@ PRIMER_REV = "GGACTACNVGGGTWTCTAAT"
 VSEARCH_ID   = 0.97   # OTU identity threshold for SILVA search
 TOP_N_GENERA = 10
 TOP_N_PHYLA  = 25
-SUBSAMPLE_N  = 50_000  # reads to classify per sample (for speed with shotgun data)
+SUBSAMPLE_N  = 10_000  # reads to classify per sample (10k is ample for genus-level taxonomy)
 
 # ---------------------------------------------------------------------------
 # SILVA taxonomy utilities
@@ -277,7 +277,7 @@ def _subsample_and_classify(
         "--threads", "1",   # keep to 1: with N workers each at 4 threads we
                             # over-subscribe cores and trigger timeouts
         "--maxaccepts", "1",
-        "--maxrejects", "32",
+        "--maxrejects", "8",
     ]
     try:
         result = subprocess.run(cmd_class, timeout=300, capture_output=True)
