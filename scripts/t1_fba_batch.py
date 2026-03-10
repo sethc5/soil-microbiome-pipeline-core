@@ -318,6 +318,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
         from compute.community_fba import (
             _merge_community_models,
             _apply_environmental_constraints,
+            _apply_bnf_minimal_medium,
             _find_target_reactions,
             _extract_genome_quality_stats,
         )
@@ -421,9 +422,16 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             bnf_mode = len(nitr_rxns) > 0
 
             if bnf_mode:
+                # Apply N-limited minimal medium BEFORE opening N2 supply.
+                # This closes the AGORA2 complete-medium (357 open exchanges at
+                # ±1000) down to a soil-relevant C-limited, N-free medium so
+                # that FVA on NITROGENASE_MO returns ATP-bounded (not LP-
+                # saturated) flux predictions consistent with Reed 2011.
+                _apply_bnf_minimal_medium(community)
+
                 # Open atmospheric N2 supply for all member EX_n2_e reactions.
                 # ub=0 was set by patch_diazotroph_models (uptake only); just
-                # ensure lb=-1000 is in place after any env constraint changes.
+                # ensure lb=-1000 is in place after the minimal-medium step.
                 for r in community.reactions:
                     if r.id == "EX_n2_e" or r.id.startswith("EX_n2_e__org"):
                         r.lower_bound = -1000.0

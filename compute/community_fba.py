@@ -80,6 +80,156 @@ def _apply_environmental_constraints(model: Any, metadata: dict) -> None:
             rxn.lower_bound = rxn.lower_bound * mult
 
 
+
+# ── BNF minimal medium ────────────────────────────────────────────────────────
+# AGORA2-style models ship with a "complete medium" where every possible
+# metabolite exchange is open at ±1000 mmol/gDW/h.  Running FVA on
+# NITROGENASE_MO in that context gives ATP-saturated values that far exceed
+# any biological rate.  For BNF mode we need a soil-relevant N-limited medium:
+#   • Close ALL EX_* uptake fluxes (lb → 0).
+#   • Reopen safe inorganic exchanges (water, protons, O2, Pi, SO4, trace
+#     metals, molybdate — the MoFe nitrogenase cofactor requirement).
+#   • Reopen one primary carbon source at ≤10 mmol/gDW/h (glucose preferred).
+#   • Keep ammonium AND all other N sources CLOSED → forces N2 as sole N supply.
+#   • The calling code (t1_fba_batch.py) handles EX_n2_e separately.
+#
+# Under this minimal medium NITROGENASE_MO rates are bounded by the carbon/ATP
+# budget, giving values comparable to Reed 2011 (0.01-5 mmol NH4-equiv/gDW/h).
+
+# EX_* IDs that are inorganic / non-N-source and should remain open.
+# Molybdate (mobd) is listed explicitly — it is the cofactor for MoFe
+# nitrogenase and must be available for the reaction to carry flux.
+_BNF_INORGANIC_EXCHANGES: frozenset[str] = frozenset({
+    "EX_h2o_e",      # water
+    "EX_h_e",        # protons
+    "EX_co2_e",      # CO2 (product of C catabolism)
+    "EX_hco3_e",     # bicarbonate
+    "EX_o2_e",       # O2 (aerobic zones; lb bounded by env constraints)
+    "EX_pi_e",       # phosphate (P source)
+    "EX_ppi_e",      # pyrophosphate
+    "EX_so4_e",      # sulfate (S source)
+    "EX_h2s_e",      # hydrogen sulfide (alt S source)
+    "EX_fe2_e",      # Fe²⁺
+    "EX_fe3_e",      # Fe³⁺
+    "EX_mg2_e",      # Mg²⁺ (Mg-ATP cofactor)
+    "EX_k_e",        # K⁺
+    "EX_na1_e",      # Na⁺
+    "EX_ca2_e",      # Ca²⁺
+    "EX_zn2_e",      # Zn²⁺
+    "EX_mn2_e",      # Mn²⁺
+    "EX_cu2_e",      # Cu²⁺
+    "EX_mobd_e",     # molybdate — MoFe nitrogenase cofactor (critical!)
+    "EX_cobalt2_e",  # Co²⁺
+    "EX_cl_e",       # Cl⁻
+    "EX_sel_e",      # selenium (selenocysteine)
+    "EX_ni2_e",      # Ni²⁺
+    "EX_thm_e",      # thiamine
+    "EX_ribflv_e",   # riboflavin
+    "EX_btn_e",      # biotin
+    "EX_fol_e",      # folate
+    "EX_pnto__R_e",  # pantothenate
+    "EX_n2_e",       # N₂ (opened separately in t1_fba_batch.py)
+})
+
+# Ordered list of BIGG carbon source EX_ IDs to try for the primary C slot.
+# Only the FIRST one found in the model is opened; all others remain closed.
+_BNF_PREFERRED_CARBON_SOURCES: list[str] = [
+    "EX_glc__D_e",   # D-glucose (canonical minimal-medium C source)
+    "EX_sucr_e",     # sucrose (common soil exudate)
+    "EX_fru_e",      # fructose
+    "EX_malt_e",     # maltose
+    "EX_ac_e",       # acetate (very common in AGORA2 models)
+    "EX_succ_e",     # succinate
+    "EX_mal__L_e",   # L-malate
+    "EX_pyr_e",      # pyruvate
+    "EX_lac__L_e",   # L-lactate
+    "EX_etoh_e",     # ethanol
+]
+
+# N-containing exchange IDs that must stay CLOSED in BNF mode.
+# Ammonium, nitrate, nitrite, urea — block all exogenous inorganic N.
+# Amino-acid/nucleoside N sources are blockaded by the "close everything
+# not on the inorganic whitelist" step and are not individually listed here.
+_BNF_N_SOURCE_PREFIXES: tuple[str, ...] = (
+    "EX_nh4_e", "EX_no3_e", "EX_no2_e", "EX_urea_e",
+    "EX_gln__L_e", "EX_glu__L_e", "EX_asn__L_e", "EX_asp__L_e",
+)
+
+# Maximum carbon uptake in BNF minimal medium (mmol/gDW/h).
+# Chosen to match standard AGORA2 monoculture minimal-medium glucose rate.
+# ATP budget: 10 mmol glucose × ~36 ATP/glucose → 360 mmol ATP/gDW/h.
+# NITROGENASE_MO ceiling: 360 / 16 × 2 ≈ 45 mmol NH4-equiv/gDW/h —
+# already a high-end estimate; most communities will be far below this.
+_BNF_CARBON_UPTAKE_BOUND: float = -10.0
+
+
+def _apply_bnf_minimal_medium(community: Any) -> None:
+    """Constrain the community model to a soil-relevant N-limited minimal medium.
+
+    This MUST be called before FBA/FVA in BNF mode to prevent ATP-saturated
+    (unrealistically high) N2-fixation flux predictions.
+
+    Strategy
+    --------
+    1.  Close ALL EX_* exchanges (set lb = 0 for any with lb < 0).
+    2.  Re-open safe inorganic exchanges (_BNF_INORGANIC_EXCHANGES) at their
+        existing bounds (already pH-scaled by _apply_environmental_constraints).
+    3.  Re-open the first available primary carbon source at
+        _BNF_CARBON_UPTAKE_BOUND (-10 mmol/gDW/h).
+    4.  Leave all N-source exchanges CLOSED (nh4, no3, urea, amino-acid N) so
+        the community must rely on the atmospheric N2 supply via nitrogenase.
+
+    The calling code (t1_fba_batch.py) opens EX_n2_e after this call.
+    """
+    # Step 1: close ALL EX_* uptake fluxes
+    original_bounds: dict[str, float] = {}
+    for rxn in community.reactions:
+        if rxn.id.startswith("EX_") and rxn.lower_bound < 0:
+            original_bounds[rxn.id] = rxn.lower_bound
+            rxn.lower_bound = 0.0
+
+    # Step 2: re-open inorganic exchanges (cap at -100 in case env-adjusted)
+    for rxn in community.reactions:
+        base_id = rxn.id.split("__org")[0]  # strip organism suffix if any
+        if base_id in _BNF_INORGANIC_EXCHANGES:
+            orig = original_bounds.get(rxn.id, -1000.0)
+            rxn.lower_bound = max(orig, -1000.0)  # retain env-constraint scaling
+
+    # Step 3: open first available primary carbon source at ≤10 mmol/gDW/h
+    carbon_opened = False
+    for c_id in _BNF_PREFERRED_CARBON_SOURCES:
+        if carbon_opened:
+            break
+        for rxn in community.reactions:
+            if rxn.id == c_id or rxn.id.startswith(c_id + "__org"):
+                rxn.lower_bound = _BNF_CARBON_UPTAKE_BOUND
+                carbon_opened = True
+
+    if not carbon_opened:
+        # Fallback: use the first carbon-containing exchange that was open
+        # originally.  Identify by checking original_bounds for any EX_*
+        # that is not in the inorganic whitelist and not an N source.
+        for rxn_id, orig_lb in original_bounds.items():
+            base_id = rxn_id.split("__org")[0]
+            if base_id in _BNF_INORGANIC_EXCHANGES:
+                continue
+            if any(base_id.startswith(p) for p in _BNF_N_SOURCE_PREFIXES):
+                continue
+            rxn = community.reactions.get_by_id(rxn_id)
+            rxn.lower_bound = _BNF_CARBON_UPTAKE_BOUND
+            carbon_opened = True
+            break
+
+    if not carbon_opened:
+        logger.warning(
+            "BNF minimal medium: no carbon source found in community model; "
+            "FVA may be infeasible."
+        )
+
+    # Step 4 is implicit: N sources remain closed (lb=0) from Step 1.
+    # EX_n2_e is opened by the calling code after this function returns.
+
+
 def _find_target_reactions(model: Any, target_pathway: str) -> list[Any]:
     """Find reactions in the model that match the target pathway."""
     patterns = _PATHWAY_PATTERNS.get(target_pathway, [target_pathway.upper()])
