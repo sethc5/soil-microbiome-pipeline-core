@@ -1,211 +1,306 @@
 # Pipeline Process Diagrams
 
-Two process diagrams: the **ideal** 4-tier BNF pipeline (what we want to build) and the **current** implementation (what is actually running), with explicit notes on divergences and the reasons behind them.
+Three chemical process flow diagrams for the BNF soil microbiome pipeline. Read in order:
+
+1. **Reference Model** — ideal 4-tier process derived from foundational design docs. The standard we are seeking to achieve.
+2. **Current Implementation** — what is actually running as of 2026-03-10. Divergences from reference are annotated with reasons.
+3. **High-Value Additions** — reference model plus eight prioritised additions that would materially increase scientific output.
+
+Stream labels show population throughput (samples passing between unit operations). Unit operations are shown with key operating parameters.
 
 ---
 
-## 1 — Ideal Pipeline
+## 1 — Reference Model
 
-Full 4-tier funnel from raw public metagenomes to field-ready intervention recommendations. Each tier reduces the candidate pool ~10× while increasing mechanistic resolution.
+Standard we are seeking to achieve. Four-tier funnel from raw public metagenomes to field-ready intervention recommendations. Each tier reduces the candidate pool ~10× while increasing mechanistic resolution. All numbers are design targets, not actuals.
 
 ```mermaid
 flowchart TB
-    classDef tier fill:#1e3a5f,stroke:#4a90d9,color:#e8f4fd,font-weight:bold
-    classDef proc fill:#0d2137,stroke:#4a90d9,color:#c9e6f8
-    classDef pass fill:#0a3020,stroke:#2ecc71,color:#a8f0c6
-    classDef discard fill:#3a0d0d,stroke:#e74c3c,color:#f5b7b1
-    classDef out fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
+    classDef feed fill:#0d2b4e,stroke:#4a90d9,color:#c9e6f8
+    classDef unit fill:#0a2a0a,stroke:#2ecc71,color:#c8f0c8
+    classDef sep fill:#2a1a00,stroke:#f39c12,color:#fdeaa7
+    classDef prod fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
+    classDef waste fill:#1a0a0a,stroke:#666,color:#999
+    classDef recycle fill:#1a1a2e,stroke:#e74c3c,color:#fab1b1
 
-    subgraph INGEST["① INGESTION — public databases"]
-        I1["NCBI SRA\nshotgun metagenomes\n(millions of samples)"]
-        I2["EBI MGnify\nprocessed metagenomes\n(500k+ studies)"]
-        I3["NEON / EMP / Qiita\namplicon + paired metadata"]
-        I4["Local BIOM/FASTA\nproject-specific sequencing"]
+    F1[/"NCBI SRA\nshotgun reads\n~2M samples"/]:::feed
+    F2[/"EBI MGnify\nprocessed assemblies\n500k+ studies"/]:::feed
+    F3[/"NEON · EMP · Qiita\namplicon + metadata"/]:::feed
+
+    subgraph T0["① T0 — QUALITY & COMPOSITION FILTER   µs–ms per sample"]
+        U0A["SEQUENCING QC\nmin 50k reads · chimera removal\ncontamination screen"]:::unit
+        U0B["METADATA CLASSIFIER\nsoil pH · texture · land use · climate zone\nnifH functional gene presence/absence"]:::unit
+        U0C["DIVERSITY ESTIMATOR\nShannon H · Chao1 · Faith PD\nPielou evenness"]:::unit
+        S0{{"SEPARATOR\nt0_pass?"}}:::sep
     end
 
-    subgraph T0BOX["② T0 — Composition & Metadata Filter  (µs–ms / sample)"]
-        T0A["Sequencing QC\nmin 50k reads · chimera removal\ncontamination screen"]
-        T0B["Metadata filter\nsoil pH · texture · land use\nclimate zone"]
-        T0C["Functional gene scan\nnifH · dsrAB · mcrA · amoA\npresence / relative abundance"]
-        T0D["Diversity metrics\nShannon · Chao1 · Faith PD\nPielou evenness"]
-        T0P{"T0\npass?"}
+    subgraph T025["② T0.25 — ML FUNCTIONAL PREDICTOR   seconds per sample"]
+        U025A["FUNCTIONAL PROFILER\nPICRUSt2 16S→KO pathway\nHUMAnN3 shotgun→MetaCyc\nFaProTax taxonomy→function"]:::unit
+        U025B["ML CLASSIFIER\nRF/GBM on OTU table + metadata\nBNF activity score\nfeatures: top genera + pH + OM%"]:::unit
+        U025C["SIMILARITY SEARCH\nBray-Curtis + UniFrac vs reference BNF DB\nmin similarity 0.3"]:::unit
+        S025{{"SEPARATOR\nt025_pass?"}}:::sep
     end
 
-    subgraph T025BOX["③ T0.25 — ML Functional Prediction  (seconds / sample)"]
-        T025A["PICRUSt2 / HUMAnN3\nfunctional profile from marker genes\nKO pathway abundances"]
-        T025B["Random Forest / GBM\nBNF activity score prediction\nOTU table + metadata features"]
-        T025C["Similarity search\nBray-Curtis + UniFrac vs\nreference high-BNF community DB"]
-        T025P{"T0.25\npass?"}
+    subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   minutes per sample"]
+        U1A["MAG BINNING\nMetaBat2/SemiBin from shotgun reads\nCheckM completeness filter\nper-sample genome bins"]:::unit
+        U1B["GENOME ANNOTATOR\nDRAM/Prokka → KEGG + MetaCyc\nnifH · nifD · nifK confirmed per bin"]:::unit
+        U1C["MODEL SYNTHESIZER\nCarveMe genome-scale SBML\nN-limited minimal medium\nMo-nitrogenase added if nifHDK+"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nshared extracellular pool\nbiomass objective\n90% growth constraint for FVA"]:::unit
+        U1E["FVA ANALYZER\nNITROGENASE_MO reactions\nfva_max x2 = NH4-equiv flux\nunits: mmol NH4-equiv per gDW per h"]:::unit
+        S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
     end
 
-    subgraph T1BOX["④ T1 — Metabolic Network Modeling  (minutes / sample)"]
-        T1A["Shotgun → MAG binning\nMetaBat2 / SemiBin\nper-sample genome bins"]
-        T1B["Genome annotation\nDRAM / Prokka\nKEGG + MetaCyc pathways"]
-        T1C["Genome-scale model\nCarveMe / ModelSEED\nfrom annotated genome bins"]
-        T1D["Community FBA\nN-limited minimal medium\nbiomass objective\nshared extracellular pool"]
-        T1E["FVA on NITROGENASE_MO\nfraction_of_optimum = 0.9\nt1_target_flux = fva_max × 2"]
-        T1F["Keystone taxa analysis\nflux deletion scanning\ntop functional contributors"]
-        T1G["Metabolic exchange network\ncross-feeding interactions\nN/C/energy coupling"]
-        T1P{"target_flux\n≥ 0.01 mmol\nNH4/gDW/h?"}
+    subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   hours per sample"]
+        U2A["dFBA TIME COURSE\n90-day growing season\nC/N/P depletion kinetics\nclimate perturbation panel"]:::unit
+        U2B["PERTURBATION SCREEN\ndrought · heat · flood · pH shift\nstability score · resilience"]:::unit
+        U2C["INTERVENTION REACTOR\nbioinoculant candidate screen\namendment effect model\nbiochar pH · compost N-release"]:::unit
+        U2D["ESTABLISHMENT PREDICTOR\ncompetitive exclusion model\ninoculant survival vs resident community\nmin_establishment_prob 0.4"]:::unit
+        S2{{"SEPARATOR\nstability >= 0.6\nestab >= 0.4?"}}:::sep
     end
 
-    subgraph T2BOX["⑤ T2 — Community Dynamics & Intervention  (hours / sample)"]
-        T2A["dFBA time-course\n90-day growing season\ncarbon / nutrient depletion curves"]
-        T2B["Perturbation screen\ndrought · heat pulse · flooding\npH shift · fertilizer pulse"]
-        T2C["Bioinoculant screen\nAzospirillum · Bradyrhizobium\nHerbaspirillum · Paenibacillus"]
-        T2D["Amendment modeling\nbiochar pH adjustment\ncompost N release kinetics"]
-        T2E["Establishment probability\ninoculant survival in resident community\ncompetitive exclusion model"]
-        T2F["Stability + resilience scoring\nresilience = recovery rate\nresistance = flux maintenance"]
-        T2P{"stability ≥ 0.6\nestablishment\n≥ 0.4?"}
-    end
+    P1[/"TOP-50 BNF COMMUNITIES\nsoil context envelope\nkeystone taxa identified"/]:::prod
+    P2[/"INTERVENTION REPORT\norganism · dose · timing\ncost per hectare"/]:::prod
+    P3[/"FIELD VALIDATION PACKAGE\nsite selection map\n15N measurement protocol"/]:::prod
+    REC(["FINDINGS FEEDBACK\nauto-detected patterns\ncalibrate filters"]):::recycle
 
-    subgraph OUTBOX["⑥ OUTPUT — Actionable Recommendations"]
-        O1["Top-50 BNF communities\nranked by t1 + t2 composite score\nwith soil context envelope"]
-        O2["Intervention report\norganism · dose · timing\ncost/ha estimate"]
-        O3["FINDINGS.md\nauto-detected anomalies\ncross-community patterns"]
-        O4["Field validation package\nsite selection criteria\nmeasurement protocol"]
-    end
+    W0["discard ~90%"]:::waste
+    W025["discard ~90%"]:::waste
+    W1["discard ~90%"]:::waste
+    W2["discard ~90%"]:::waste
 
-    INGEST --> T0A
-    T0A --> T0B --> T0C --> T0D --> T0P
-    T0P -->|"~10% pass"| T025A
-    T0P -->|fail| D0["🗑 ~90% discarded"]:::discard
+    F1 & F2 & F3 --> U0A --> U0B --> U0C --> S0
+    S0 -->|"~10% pass\n~200k samples"| U025A
+    S0 -->|"~90% reject"| W0
 
-    T025A --> T025B --> T025C --> T025P
-    T025P -->|"~10% pass"| T1A
-    T025P -->|fail| D025["🗑 ~90% discarded"]:::discard
+    U025A --> U025B --> U025C --> S025
+    S025 -->|"~10% pass\n~20k samples"| U1A
+    S025 -->|"~90% reject"| W025
 
-    T1A --> T1B --> T1C --> T1D --> T1E --> T1F --> T1G --> T1P
-    T1P -->|"~10% pass"| T2A
-    T1P -->|fail| D1["🗑 ~90% discarded"]:::discard
+    U1A --> U1B --> U1C --> U1D --> U1E --> S1
+    S1 -->|"~10% pass\n~2k samples"| U2A
+    S1 -->|"~90% reject"| W1
 
-    T2A --> T2B --> T2C --> T2D --> T2E --> T2F --> T2P
-    T2P -->|"~10% pass"| O1
-    T2P -->|fail| D2["🗑 ~90% discarded"]:::discard
+    U2A --> U2B --> U2C --> U2D --> S2
+    S2 -->|"~10% pass\ntop 200"| P1
+    S2 -->|"~90% reject"| W2
 
-    O1 --> O2 --> O3 --> O4
-
-    class INGEST,I1,I2,I3,I4 tier
-    class T0A,T0B,T0C,T0D,T025A,T025B,T025C,T1A,T1B,T1C,T1D,T1E,T1F,T1G,T2A,T2B,T2C,T2D,T2E,T2F proc
-    class T0P,T025P,T1P,T2P pass
-    class D0,D025,D1,D2 discard
-    class O1,O2,O3,O4 out
+    P1 --> P2 --> P3
+    P1 -.->|recycle| REC
+    REC -.->|calibrate| U0B
 ```
 
 ---
 
 ## 2 — Current Implementation
 
-Same structure, showing what is actually running as of 2026-03-10 (commit `ad31e7b`). Orange nodes = skipped/partial. Red nodes = bugs encountered (now fixed). Green = complete.
+What is actually running as of 2026-03-10 (latest commit `f51cfef`). Orange = skipped or constrained. Red = bugs encountered (all fixed). Green = complete. Numbers from live DB query.
 
 ```mermaid
 flowchart TB
-    classDef tier fill:#1e3a5f,stroke:#4a90d9,color:#e8f4fd,font-weight:bold
-    classDef proc fill:#0d2137,stroke:#4a90d9,color:#c9e6f8
-    classDef pass fill:#0a3020,stroke:#2ecc71,color:#a8f0c6
-    classDef discard fill:#3a0d0d,stroke:#e74c3c,color:#f5b7b1
-    classDef out fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
-    classDef skip fill:#3a2800,stroke:#f39c12,color:#fdeaa7
-    classDef warn fill:#3a1500,stroke:#e67e22,color:#fad7a0
-    classDef done fill:#0a3020,stroke:#27ae60,color:#a9dfbf
-    classDef bug fill:#3d0000,stroke:#c0392b,color:#fadbd8
+    classDef feed fill:#0d2b4e,stroke:#4a90d9,color:#c9e6f8
+    classDef unit fill:#0a2a0a,stroke:#2ecc71,color:#c8f0c8
+    classDef sep fill:#2a1a00,stroke:#f39c12,color:#fdeaa7
+    classDef prod fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
+    classDef waste fill:#1a0a0a,stroke:#666,color:#999
+    classDef skip fill:#2a1800,stroke:#f39c12,color:#fdeaa7
+    classDef warn fill:#1a0d00,stroke:#e67e22,color:#f0c080
+    classDef done fill:#0a2a12,stroke:#27ae60,color:#a9dfbf
+    classDef bug fill:#2a0000,stroke:#c0392b,color:#e8b0b0
 
-    subgraph INGEST["① INGESTION — actual sources"]
-        I1["NEON amplicon portal\n16S V4 · 17,567 samples\nneon_adapter.py ✅"]
-        I2["EBI MGnify API\n16S amplicon · 95 studies\nmgnify_adapter.py ✅"]
-        I3["Synthetic communities\n440,000 simulated samples\nfor model validation"]
-        IDIV["⚠ DIVERGENCE\nNo shotgun metagenomes yet.\nSRA adapter exists but unused.\nReason: 16S data was available\nfirst via NEON/MGnify APIs;\nshotgun SRA download pipeline\nnot yet triggered."]:::warn
+    F1[/"NEON amplicon portal\n16S V4 · 17,567 samples\nneon_adapter.py"/]:::feed
+    F2[/"EBI MGnify API\n16S amplicon · 95 studies\nmgnify_adapter.py"/]:::feed
+    F3[/"Synthetic communities\n440,000 generated\nmodel validation"/]:::feed
+    FW["NO SHOTGUN INPUT\nSRA adapter exists but not triggered\nReason: 16S APIs available first"]:::warn
+
+    subgraph T0["① T0 — 16S QUALITY & CLASSIFICATION   COMPLETE"]
+        U0A["16S CLASSIFIER\nvsearch vs SILVA 138 · 97% identity\nSUBSAMPLE_N=10k · threads=1 · maxrejects=8\nprocess_neon_16s.py"]:::unit
+        U0B["METADATA FILTER\nsoil pH · land use · depth\nsequencing depth threshold"]:::unit
+        U0C["DIVERSITY ESTIMATOR\nShannon H · Chao1\nquality_filter.py"]:::unit
+        S0{{"SEPARATOR\nt0_pass?"}}:::sep
+        T0R["11,027 NEON pass\n95 MGnify pass\n440k synthetic pass"]:::done
     end
 
-    subgraph T0BOX["② T0 — Filter  (COMPLETE ✅)"]
-        T0A["16S classification\nvsearch vs SILVA 138\n97% identity · SUBSAMPLE_N=10k"]
-        T0B["Metadata filter\nsoil pH · land use\nsequencing depth threshold"]
-        T0C["Diversity metrics\nShannon · Chao1\nquality_filter.py"]
-        T0P{"T0\npass?"}
-        T0DONE["11,027 NEON t0_pass\n95 MGnify t0_pass\n440k synthetic t0_pass"]:::done
+    subgraph T025["② T0.25 — ML PREDICTOR   SKIPPED"]
+        T025S["functional_predictor.py\npicrust2_runner.py · humann3_shortcut.py\nAll scripts exist — NOT RUN\nHUMAnN3 = shotgun only; N/A here\nPICRUSt2 works on 16S but not wired\nNo BNF ML model trained\nDecision: skip, accept higher T1 load"]:::skip
     end
 
-    subgraph T025BOX["③ T0.25 — ML Prediction  (SKIPPED ⚠)"]
-        T025SKIP["functional_predictor.py\npicrust2_runner.py\nhumann3_shortcut.py\n— scripts exist, NOT RUN"]:::skip
-        T025WHY["WHY SKIPPED\nHUMAnN3 = shotgun only; N/A here.\nPICRUSt2 works on 16S but not\nwired into BNF config.\nNo BNF ML model trained yet.\nDecision: skip T0.25, accept\nhigher T1 candidate load."]:::warn
+    subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   COMPLETE — 4,897 written in 20 min"]
+        U1A["GENUS CLASSIFIER\n16S taxonomy → genus names\nvsearch top-hit\nReplaces: MAG binning"]:::unit
+        U1B["MODEL LOOKUP\nPre-built AGORA2 SBML per genus\n20 genera on disk\nReplaces: CarveMe per-sample\nDivergence: genus-level proxy only"]:::unit
+        U1C["NITROGENASE PATCHER\npatch_diazotroph_models.py\n9 diazotroph genera patched\nNITROGENASE_MO stoichiometry added\ncommit 90f0e92"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium\n28 of 357 exchanges open\nbiomass objective · GLPK solver\ncommit ad31e7b"]:::unit
+        U1E["FVA ANALYZER\nNITROGENASE_MO reactions\n90% growth constraint · processes=1\nfva_max x2 = NH4-equiv/gDW/h\ncommit 13ee41d"]:::unit
+        S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
+        T1R["4,686 real t1_pass\nNEON 4,610 + MGnify 76\n1,113 non-BNF: avg 149 gDW/gDW/h\n3,845 BNF: avg 44.5 mmol NH4-equiv/gDW/h\nmax 108 in multi-diazotroph — watch item"]:::done
+        T1B["BUG HISTORY — 3 ITERATIONS REQUIRED\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n  community FBA extracellular pools are NOT shared\n3 Complete AGORA2 medium (357 open exchanges)\n  ATP-unbounded FVA: 100-400 mmol/gDW/h\n  Fixed: minimal medium closes 329 exchanges\n  All three fixed by commit ad31e7b"]:::bug
     end
 
-    subgraph T1BOX["④ T1 — Metabolic Modeling  (IN PROGRESS 🔄)"]
-        T1A["16S → genus names\nvsearch classification\n(replaces MAG binning)"]
-        T1B["Pre-built AGORA2 SBML models\n20 genera on disk\n(replaces CarveMe per-sample)"]
-        T1C["NITROGENASE_MO patch\npatch_diazotroph_models.py\n9 genera patched\ncommit 90f0e92 ✅"]
-        T1D["Community FBA\nN-limited minimal medium\n28/357 exchanges open\ncommit ad31e7b ✅"]
-        T1E["FVA on NITROGENASE_MO\nfva_max × 2 = NH4-equiv\ncommit 13ee41d ✅"]
-        T1P{"target_flux\n≥ 0.01 mmol\nNH4/gDW/h?"}
-        T1W1["⚠ DIVERGENCE: genus proxy\nAll Bradyrhizobium → one SBML.\nStrain-level metabolic variation\nlost. Pre-built models not\nsample-specific.\nReason: CarveMe requires shotgun\nMAGs not yet available."]:::warn
-        T1W2["🐛 BUG HISTORY (all fixed)\n① Biomass objective used as\n   BNF proxy — no nitrogenase\n   in AGORA2 models\n② EX_nh4_e objective → LP\n   saturation at 1000 mmol/gDW/h\n   (extracellular pools not shared)\n③ Complete medium (357 open\n   exchanges) → ATP-unbounded\n   FVA: 100–400 mmol/gDW/h\n→ Fixed: ad31e7b minimal medium"]:::bug
-        T1RUN["PID 559725 · batch 823/980\n4,115 written · 3,815 T1-pass\nhetzner2 · nearly complete"]:::done
+    subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   PARTIAL"]
+        U2A["dFBA TIME COURSE\ndfba_runner.py · climate perturbation\n20k synthetic communities complete\nReal community run: PENDING after T1"]:::skip
+        U2B["STABILITY SCORER\nstability_analyzer.py\nPending real community data"]:::skip
+        T2W["INTERVENTION SCREENING\nbioinoculant_screen · amendment_effect_model\nestablishment_predictor\nAll scripts exist — NONE WIRED\nBlocked: needs stable real T1 first"]:::warn
+        S2{{"SEPARATOR\nstability >= 0.6?"}}:::sep
     end
 
-    subgraph T2BOX["⑤ T2 — Dynamics  (PARTIAL ⚠)"]
-        T2A["dFBA time-course\ndfba_runner.py\nclimate perturbation"]
-        T2B["Stability scoring\nstability_analyzer.py"]
-        T2P{"t2_pass?"}
-        T2DONE["20,000 synthetic communities\nt2_bnf_trajectory populated\n(t1_pass not stored for synthetic;\nseparate validation path)"]:::done
-        T2PEND["Real community T2\nNOT YET RUN\nQueued after T1 completes"]:::skip
-        T2WHY["WHY PARTIAL\nT2 dFBA needs stable T1 flux\nas initial conditions. Ran\nsynthetic first to validate\ndFBA model parameters.\nReal communities blocked\nuntil T1 BNF fix resolves."]:::warn
-        T2INT["⚠ MISSING: Intervention screening\nbioinoculant_screen · amendment_model\nestablishment_predictor\n— all scripts exist, none wired\ninto BNF pipeline config yet"]:::skip
-    end
+    P1[/"4,686 REAL t1_pass\n3,845 BNF + 1,113 biomass-proxy\nkeystone taxa stored in DB\n20k synthetic T2 complete"/]:::prod
+    P2[/"FINDINGS.md\nserver-local only\nnot yet committed to repo"/]:::warn
+    P3["NO INTERVENTION REPORT\nNO FIELD PACKAGE\nBlocked on T2 intervention data"]:::skip
 
-    subgraph OUTBOX["⑥ OUTPUT — Current State"]
-        O1["3,899 real t1_pass (NEON 3,823 + MGnify 76)\n1,041 non-BNF · gDW/gDW/h biomass proxy\n3,142 BNF · avg 44.4 mmol NH4-equiv/gDW/h\n⚠ max 108 in multi-diazotroph communities"]
-        O2["FINDINGS.md\nserver-local only\nnot yet committed to repo"]:::warn
-        O3["No intervention report\nintervention_report.py exists\nbut no T2 intervention data"]:::skip
-        O4["No field validation package"]:::skip
-    end
+    W0["NEON: 6,440 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
+    W1["~6,341 real communities\nno matching SBML genus"]:::waste
+    W2["pending"]:::waste
 
-    INGEST --> T0A
-    IDIV -.->|context| I1
-    T0A --> T0B --> T0C --> T0P
-    T0P -->|pass| T025SKIP
-    T0P -->|fail| D0["🗑 discarded"]:::discard
-    T0P -.-> T0DONE
+    F1 & F2 & F3 --> U0A
+    FW -.->|"missing"| F1
+    U0A --> U0B --> U0C --> S0
+    S0 -->|"pass"| T025S
+    S0 -->|"fail"| W0
+    S0 -.-> T0R
 
-    T025SKIP --> T025WHY
-    T025WHY --> T1A
+    T025S -->|"skipped — all pass to T1"| U1A
 
-    T1A --> T1B --> T1C --> T1D --> T1E --> T1P
-    T1W1 -.->|affects| T1B
-    T1W2 -.->|fixed| T1D
-    T1RUN -.->|status| T1P
-    T1P -->|pass| T2A
-    T1P -->|fail| D1["🗑 discarded"]:::discard
+    U1A --> U1B --> U1C --> U1D --> U1E --> S1
+    T1B -.->|"fixed by ad31e7b"| U1D
+    S1 -->|"pass"| U2A
+    S1 -->|"fail"| W1
+    S1 -.-> T1R
 
-    T2A --> T2B --> T2P
-    T2DONE -.->|status| T2A
-    T2PEND -.->|status| T2A
-    T2WHY -.->|reason| T2PEND
-    T2INT -.->|missing| T2B
-    T2P -->|pass| O1
-    T2P -->|fail| D2["🗑 discarded"]:::discard
+    U2A --> U2B --> S2
+    T2W -.->|"missing unit"| U2B
+    S2 -->|"pass"| P1
+    S2 -->|"fail"| W2
 
-    O1 --> O2 --> O3 --> O4
-
-    class I1,I2,I3 tier
-    class T0A,T0B,T0C,T1A,T1B,T1C,T1D,T1E,T2A,T2B proc
-    class T0P,T1P,T2P pass
-    class D0,D1,D2 discard
-    class O1,O2 out
+    P1 --> P2
+    P2 --> P3
 ```
 
 ---
 
-## Divergence Summary
+## 3 — High-Value Additions to Reference Model
 
-| Pipeline Step | Ideal | Current | Reason |
+Reference model (Diagram 1) plus eight additions (lettered A–H, purple) that would materially increase scientific value. Two feedback loops (blue) close the gap between computational predictions and real-world measurement.
+
+| Addition | Unit Operation | Scientific Value |
+|---|---|---|
+| **A** — Metatranscriptomics | Expression Filter at T0 | Confirms nifH genes are actively transcribed, not just present; eliminates genomically-capable but transcriptionally-silent communities |
+| **B** — 15N isotope dilution | Validation feedback loop | Ground-truth BNF rate from field; recalibrates the 0.01 mmol/gDW/h threshold against measured data |
+| **C** — Surrogate FBA predictor | ML unit at T0.25 + training loop | After ~4k FBA runs, train ML to predict NITROGENASE_MO flux from 16S taxonomy; skips FBA for obvious pass/fail; improves over time |
+| **D** — Metabolic exchange map | Cross-feeding network at T1 | Maps N/C/energy coupling between community members; identifies syntrophic pairs responsible for high BNF; improves keystone taxa precision |
+| **E** — Agent-based model | ABM at T2 | Individual-based spatial dynamics (iDynoMiCS); strain-level competition for establishment; more accurate than population-level dFBA for inoculant survival |
+| **F** — Spatial kriging | Post-processing | Kriging interpolation across NEON site coordinates → continuous BNF potential field map; enables site-specific field recommendations |
+| **G** — Time-series tracking | Post-processing | Multi-visit NEON data → community BNF trajectory over seasons and years; detects stable vs transient high-BNF communities |
+| **H** — Cross-pipeline optimizer | Post-processing | Joint ranking across BNF + C-sequestration + pathogen-suppression pipelines; identifies communities that excel at multiple soil health functions |
+
+```mermaid
+flowchart TB
+    classDef feed fill:#0d2b4e,stroke:#4a90d9,color:#c9e6f8
+    classDef unit fill:#0a2a0a,stroke:#2ecc71,color:#c8f0c8
+    classDef sep fill:#2a1a00,stroke:#f39c12,color:#fdeaa7
+    classDef prod fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
+    classDef waste fill:#1a0a0a,stroke:#666,color:#999
+    classDef add fill:#1a0d2e,stroke:#8e44ad,color:#d7bde2
+    classDef val fill:#0d1f2e,stroke:#2980b9,color:#aed6f1
+
+    F1[/"NCBI SRA\nshotgun reads\n~2M samples"/]:::feed
+    F2[/"EBI MGnify\nprocessed assemblies\n500k+ studies"/]:::feed
+    F3[/"NEON · EMP · Qiita\namplicon + metadata"/]:::feed
+    FA1[/"METATRANSCRIPTOMICS\nmRNA from paired sites\nnifH expression ratios\nADDITION A"/]:::add
+    FA2[/"15N FIELD MEASUREMENTS\nisotope dilution assay\nground-truth BNF rate/gDW/h\nADDITION B"/]:::add
+
+    subgraph T0["① T0 — QUALITY & COMPOSITION FILTER"]
+        U0A["SEQUENCING QC\nmin 50k reads · chimera removal"]:::unit
+        U0B["METADATA CLASSIFIER\nsoil pH · texture · land use · nifH presence"]:::unit
+        U0C["DIVERSITY ESTIMATOR\nShannon H · Chao1 · Faith PD"]:::unit
+        U0D["EXPRESSION FILTER\nmrna_to_dna_ratio for nifH\nactive transcription required\nADDITION A"]:::add
+        S0{{"SEPARATOR\nt0_pass?"}}:::sep
+    end
+
+    subgraph T025["② T0.25 — ML FUNCTIONAL PREDICTOR"]
+        U025A["FUNCTIONAL PROFILER\nPICRUSt2 16S→KO\nHUMAnN3 shotgun→MetaCyc"]:::unit
+        U025B["ML CLASSIFIER\nRF/GBM: OTU + metadata → BNF score"]:::unit
+        U025C["SIMILARITY SEARCH\nBray-Curtis + UniFrac vs reference BNF DB"]:::unit
+        U025D["SURROGATE FBA PREDICTOR\nML trained on T1 FVA outputs\npredict NITROGENASE_MO flux from 16S alone\nfast-lane: skip FBA for obvious cases\nADDITION C"]:::add
+        S025{{"SEPARATOR\nt025_pass?"}}:::sep
+    end
+
+    subgraph T1["③ T1 — METABOLIC NETWORK REACTOR"]
+        U1A["MAG BINNING\nMetaBat2/SemiBin · CheckM\nper-sample genome bins"]:::unit
+        U1B["GENOME ANNOTATOR\nDRAM/Prokka → KEGG + MetaCyc\nnifH · nifD · nifK per bin"]:::unit
+        U1C["MODEL SYNTHESIZER\nCarveMe genome-scale SBML\nMo-nitrogenase from annotation"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium\nbiomass objective · shared pool"]:::unit
+        U1E["FVA ANALYZER\nNITROGENASE_MO · 90% growth"]:::unit
+        U1F["METABOLIC EXCHANGE MAP\ncross-feeding network analysis\nN/C/energy coupling per pair\nidentify syntrophic keystones\nADDITION D"]:::add
+        S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
+    end
+
+    subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR"]
+        U2A["dFBA TIME COURSE\n90-day season · C/N/P kinetics"]:::unit
+        U2B["PERTURBATION SCREEN\ndrought · heat · pH shift"]:::unit
+        U2C["INTERVENTION REACTOR\nbioinoculant screen · amendment model"]:::unit
+        U2D["ESTABLISHMENT PREDICTOR\ncompetitive exclusion · population-level"]:::unit
+        U2E["AGENT-BASED COMPETITION\niDynoMiCS individual-based model\nstrain-level spatial dynamics\nhigher accuracy for inoculant survival\nADDITION E"]:::add
+        S2{{"SEPARATOR\nstability >= 0.6\nestab >= 0.4?"}}:::sep
+    end
+
+    subgraph POST["⑤ POST-PROCESSING — ADDITIONS F · G · H"]
+        PP1["SPATIAL INTERPOLATOR\nKriging on NEON GPS coordinates\nBNF potential field map\ncontinuous geographic surface\nADDITION F"]:::add
+        PP2["TIME-SERIES TRACKER\nmulti-visit NEON sites\ncommunity BNF trajectory\nstable vs transient high-BNF\nADDITION G"]:::add
+        PP3["CROSS-PIPELINE OPTIMIZER\nBNF x C-sequestration x pathogen suppression\njoint community ranking\nsoil health index\nADDITION H"]:::add
+    end
+
+    P1[/"TOP-50 BNF COMMUNITIES\nsoil context envelope\nkeystone taxa + exchange network"/]:::prod
+    P2[/"INTERVENTION REPORT\norganism · dose · timing\ncost per hectare + site map"/]:::prod
+    P3[/"FIELD VALIDATION PACKAGE\nsite selection · 15N protocol\nground-truth measurement plan"/]:::prod
+
+    VL["15N VALIDATION LOOP\nfield BNF rate vs predicted flux\nrecalibrate 0.01 threshold\nADDITION B"]:::val
+    SL["SURROGATE TRAINING LOOP\nT1 FVA results → ML training set\napprox 4k runs = usable model\nimproves continuously\nADDITION C"]:::val
+
+    W0["discard ~90%"]:::waste
+    W025["discard ~90%"]:::waste
+    W1["discard ~90%"]:::waste
+    W2["discard ~90%"]:::waste
+
+    FA1 --> U0D
+    F1 & F2 & F3 --> U0A --> U0B --> U0C --> U0D --> S0
+    S0 -->|"~10% pass"| U025A
+    S0 -->|"~90% reject"| W0
+
+    U025A --> U025B --> U025C --> U025D --> S025
+    S025 -->|"~10% pass"| U1A
+    S025 -->|"~90% reject"| W025
+
+    U1A --> U1B --> U1C --> U1D --> U1E --> U1F --> S1
+    S1 -->|"~10% pass"| U2A
+    S1 -->|"~90% reject"| W1
+
+    U2A --> U2B --> U2C --> U2D --> U2E --> S2
+    S2 -->|"~10% pass"| P1
+    S2 -->|"~90% reject"| W2
+
+    P1 --> PP1 & PP2 & PP3
+    PP1 & PP2 & PP3 --> P2 --> P3
+
+    U1E -.->|"FVA training data"| SL
+    SL -.->|"retrain surrogate"| U025D
+    FA2 -.->|"measured field rates"| VL
+    P1 -.->|"predicted flux"| VL
+    VL -.->|"recalibrate threshold"| S1
+```
+
+---
+
+## Divergence Summary — Reference vs Current
+
+| Step | Reference | Current | Reason |
 |---|---|---|---|
-| **Ingestion** | Shotgun metagenomes from SRA (millions) | 16S amplicon from NEON + MGnify (17.7k) | 16S data available first via cleaner APIs; SRA shotgun pipeline not yet triggered |
-| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | **Skipped entirely** | HUMAnN3 requires shotgun (not applicable). PICRUSt2 works on 16S but not wired into BNF config and no BNF target ML model trained. Cost decision to skip T0.25 and accept extra T1 load. |
-| **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML per genus (20 genera) | CarveMe requires shotgun MAGs; genus-level proxy loses strain metabolic variation |
-| **T1 nitrogenase** | Present in genome-derived models | **Had to patch 9 genera** via `patch_diazotroph_models.py` | AGORA2 models lack explicit nitrogenase; not a catalogued reaction in AGORA2 template |
-| **T1 medium** | N-limited minimal medium from the start | Initially complete medium (357 open exchanges) → **3 iterations to fix** | Default AGORA2 medium is complete; ATP-saturation wasn't obvious until test values hit 100+ mmol/gDW/h |
-| **T1 objective** | FVA on NITROGENASE_MO from the start | Biomass proxy → EX_nh4_e (LP sat) → FVA on NITROGENASE_MO | Community FBA extracellular pool architecture not shared — learned empirically |
-| **T2 real communities** | Run after T1 completes | **Synthetic only** (20k communities) | T1 BNF flux values were unreliable until ad31e7b; holding T2 real until T1 stabilises |
-| **T2 intervention screening** | Full bioinoculant + amendment screen | **Not implemented** | Scripts exist (`intervention_screener.py`, `establishment_predictor.py`) but not wired into BNF config; blocked downstream of T2 real community run |
-| **Output** | Ranked communities + intervention report + field package | 3,899 real t1_pass (3,823 NEON + 76 MGnify); 1,041 non-BNF biomass-proxy + 3,142 BNF (avg 44.4, max 108 mmol NH4-equiv/gDW/h — max warrants monitoring); no intervention report | Intervention report requires T2 intervention data which requires T2 real which requires stable T1 BNF values |
-| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.4 ✅ but max 108 seen in multi-diazotroph communities | Multi-diazotroph communities may pool carbon across members beyond the single-organism ceiling; non-N carbon sources (fatty acids etc) not fully blocked by current minimal medium whitelist |
+| **Input** | Shotgun metagenomes from SRA (millions) | 16S amplicon: NEON 17,567 + MGnify 95 + 440k synthetic | 16S APIs available first; SRA shotgun not yet triggered |
+| **T0 method** | Multi-source QC + functional gene scan | vsearch 16S → SILVA 138 classification only | Sufficient for 16S; functional gene scan deferred to T1 genus lookup |
+| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | Skipped entirely | HUMAnN3 is shotgun-only; PICRUSt2 not wired into BNF config; no trained model |
+| **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML, 20 genera on disk | CarveMe requires shotgun MAGs; genus-level proxy loses strain variation |
+| **T1 nitrogenase** | Present from annotation-driven model build | Patched into 9 genera via patch_diazotroph_models.py | AGORA2 template omits nitrogenase; not a catalogued AGORA2 reaction |
+| **T1 medium** | N-limited minimal medium from the start | 3 iterations to reach correct medium (commits 90f0e92 → 13ee41d → ad31e7b) | AGORA2 ships with complete medium; LP saturation and ATP-unbounded FVA not obvious until empirically observed |
+| **T1 results** | ~2,000 high-confidence metabolic hits | 4,686 real t1_pass (3,845 BNF avg 44.5 mmol NH4/gDW/h + 1,113 non-BNF) | Flux at glucose ceiling; max 108 in multi-diazotroph communities needs monitoring |
+| **T2 real** | Run after T1 completes | Synthetic only (20k); real blocked until T1 BNF values stabilised | Needed stable T1 baseline before running expensive dFBA |
+| **T2 intervention** | Full bioinoculant + amendment screen | Not implemented | Scripts exist but not wired into BNF config; downstream of T2 real |
+| **Output** | Ranked communities + intervention report + field package | 4,686 t1_pass in DB; FINDINGS.md server-local; no report or field package | Blocked: report requires T2 intervention data |
+| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.5 on target; max 108 in multi-diazotroph communities | Multi-diazotroph pooling likely exceeds single-organism ceiling; non-N carbon sources not fully blocked by inorganic whitelist |
