@@ -45,7 +45,7 @@ flowchart TB
         U1A["MAG BINNING\nMetaBat2/SemiBin from shotgun reads\nCheckM completeness filter\nper-sample genome bins"]:::unit
         U1B["GENOME ANNOTATOR\nDRAM/Prokka → KEGG + MetaCyc\nnifH · nifD · nifK confirmed per bin"]:::unit
         U1C["MODEL SYNTHESIZER\nCarveMe genome-scale SBML\nN-limited minimal medium\nMo-nitrogenase added if nifHDK+"]:::unit
-        U1D["COMMUNITY FBA REACTOR\nshared extracellular pool\nbiomass objective\n90% growth constraint for FVA"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective\n90% growth constraint for FVA"]:::unit
         U1E["FVA ANALYZER\nNITROGENASE_MO reactions\nfva_max x2 = NH4-equiv flux\nunits: mmol NH4-equiv per gDW per h"]:::unit
         S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
     end
@@ -128,11 +128,11 @@ flowchart TB
         U1A["GENUS CLASSIFIER\n16S taxonomy → genus names\nvsearch top-hit\nReplaces: MAG binning"]:::unit
         U1B["MODEL LOOKUP\nPre-built AGORA2 SBML per genus\n20 genera on disk\nReplaces: CarveMe per-sample\nDivergence: genus-level proxy only"]:::unit
         U1C["NITROGENASE PATCHER\npatch_diazotroph_models.py\n9 diazotroph genera patched\nNITROGENASE_MO stoichiometry added\ncommit 90f0e92"]:::unit
-        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium\n28 of 357 exchanges open\nbiomass objective · GLPK solver\ncommit ad31e7b"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium · 28/357 exchanges open\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective · HiGHS/hybrid solver\ncommit metabolite-ns"]:::unit
         U1E["FVA ANALYZER\nNITROGENASE_MO reactions\n90% growth constraint · processes=1\nfva_max x2 = NH4-equiv/gDW/h\ncommit 13ee41d"]:::unit
         S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
-        T1R["4,686 real t1_pass\nNEON 4,610 + MGnify 76\n1,113 non-BNF: avg 149 gDW/gDW/h\n3,845 BNF: avg 44.5 mmol NH4-equiv/gDW/h\nmax 108 in multi-diazotroph — watch item"]:::done
-        T1B["BUG HISTORY — 3 ITERATIONS REQUIRED\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n  community FBA extracellular pools are NOT shared\n3 Complete AGORA2 medium (357 open exchanges)\n  ATP-unbounded FVA: 100-400 mmol/gDW/h\n  Fixed: minimal medium closes 329 exchanges\n  All three fixed by commit ad31e7b"]:::bug
+        T1R["4,686 real t1_pass (pre-fix values — T1 RERUN PENDING)\nNEON 4,610 + MGnify 76\n1,113 non-BNF: avg 149 gDW/gDW/h\n3,845 BNF: avg 44.5 mmol NH4-equiv/gDW/h (inflated)\nmax 108 → expect ≤45 after metabolite-ns rerun"]:::done
+        T1B["BUG HISTORY — 4 ITERATIONS REQUIRED\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n3 Complete AGORA2 medium — ATP-unbounded FVA 100-400\n  Fixed: minimal medium closes 329 exchanges (ad31e7b)\n4 Shared intracellular metabolite pools\n  LP stacked N×ATP into shared atp_c pool\n  BNF inflated to max 108 (should be ≤45 mmol/gDW/h)\n  Fixed: namespace met ids per organism (metabolite-ns)"]:::bug
     end
 
     subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   PARTIAL"]
@@ -303,4 +303,4 @@ flowchart TB
 | **T2 real** | Run after T1 completes | Synthetic only (20k); real blocked until T1 BNF values stabilised | Needed stable T1 baseline before running expensive dFBA |
 | **T2 intervention** | Full bioinoculant + amendment screen | Not implemented | Scripts exist but not wired into BNF config; downstream of T2 real |
 | **Output** | Ranked communities + intervention report + field package | 4,686 t1_pass in DB; FINDINGS.md server-local; no report or field package | Blocked: report requires T2 intervention data |
-| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.5 on target; max 108 in multi-diazotroph communities | Multi-diazotroph pooling likely exceeds single-organism ceiling; non-N carbon sources not fully blocked by inorganic whitelist |
+| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.5 on target; max 108 in multi-diazotroph communities — **fix committed** (metabolite-ns) | Root cause: shared intracellular metabolite pools let LP stack N×ATP from multiple organisms. Fixed: `_merge_community_models` now namespaces `atp_c → atp_c__org1` etc. while keeping extracellular pool shared. T1 rerun pending to confirm ≤45 ceiling. |

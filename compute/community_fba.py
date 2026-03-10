@@ -289,11 +289,17 @@ def _is_exchange_rxn(rxn: Any) -> bool:
 
 
 def _merge_community_models(member_models: list, max_size: int) -> Any | None:
-    """Merge member COBRApy models into a community model via compartment namespacing.
+    """Merge member COBRApy models into a community model via full compartment namespacing.
 
-    Exchange reactions (EX_*) are shared across all organisms — they represent
-    the common extracellular nutrient pool. Only intracellular reactions are
-    suffixed per organism. This eliminates LP inflation and EX_* duplicate warnings.
+    Exchange reactions (EX_*) represent the community extracellular nutrient pool and
+    are shared across all organisms — they are NOT namespaced. Intracellular reactions
+    are suffixed per organism (e.g. PGK__org1) AND their intracellular metabolites are
+    also namespaced (e.g. atp_c → atp_c__org1). Extracellular metabolites (compartment
+    'e' / id ending '_e') remain shared.
+
+    This eliminates LP inflation where all organisms' intracellular ATP/NADPH pools were
+    merged into a single shared pool, letting the LP stack N organisms' catabolism into
+    a single NITROGENASE_MO reaction and wildly inflating BNF flux predictions.
     """
     try:
         import cobra
@@ -317,27 +323,85 @@ def _merge_community_models(member_models: list, max_size: int) -> Any | None:
         rxn.id for rxn in community.reactions if _is_exchange_rxn(rxn)
     }
 
+    # Extracellular compartment identifiers — metabolites in these compartments
+    # remain shared across all organisms (they ARE the community nutrient medium).
+    _EXTRACELLULAR_COMPARTMENTS = frozenset({"e", "e0", "[e]", "extracellular"})
+
+    def _is_extracellular_met(met: Any) -> bool:
+        compartment = getattr(met, "compartment", "") or ""
+        if compartment in _EXTRACELLULAR_COMPARTMENTS:
+            return True
+        # BIGG fallback: id ends with _e or _e0
+        return met.id.endswith("_e") or met.id.endswith("_e0")
+
     for i, m in enumerate(models[1:], start=1):
         suffix = f"__org{i}"
-        rxns_to_add = []
+        rxns_to_add: list = []
+        # Cache of namespaced metabolite objects created for this organism so we
+        # don't create duplicate cobra.Metabolite instances across reactions.
+        org_met_cache: dict[str, Any] = {}
+
         for rxn in m.reactions:
-            new_rxn = rxn.copy()
             if _is_exchange_rxn(rxn):
-                # Shared extracellular pool: add once, skip duplicates silently
+                # Shared extracellular pool: add once, silently skip duplicates.
                 if rxn.id not in added_exchange_ids:
                     added_exchange_ids.add(rxn.id)
-                    rxns_to_add.append(new_rxn)
-            else:
-                # Intracellular: namespace per organism
-                new_rxn.id = f"{rxn.id}{suffix}"
-                rxns_to_add.append(new_rxn)
+                    rxns_to_add.append(rxn.copy())
+                continue
+
+            # Intracellular reaction: namespace reaction ID and rebuild stoichiometry
+            # so that each organism's cytosolic/mitochondrial pools are isolated.
+            new_rxn = cobra.Reaction(
+                id=f"{rxn.id}{suffix}",
+                name=f"{rxn.name or rxn.id}{suffix}",
+                subsystem=getattr(rxn, "subsystem", "") or "",
+                lower_bound=rxn.lower_bound,
+                upper_bound=rxn.upper_bound,
+            )
+
+            new_stoich: dict[Any, float] = {}
+            for met, coeff in rxn.metabolites.items():
+                if _is_extracellular_met(met):
+                    # Extracellular metabolite — bind to the shared community pool.
+                    if community.metabolites.has_id(met.id):
+                        new_stoich[community.metabolites.get_by_id(met.id)] = coeff
+                    else:
+                        # Not yet in community model; create it (shared, no suffix).
+                        ext_met = cobra.Metabolite(
+                            id=met.id,
+                            formula=getattr(met, "formula", None),
+                            name=getattr(met, "name", met.id) or met.id,
+                            charge=getattr(met, "charge", 0) or 0,
+                            compartment=getattr(met, "compartment", "e") or "e",
+                        )
+                        new_stoich[ext_met] = coeff
+                else:
+                    # Intracellular metabolite — namespace to this organism.
+                    ns_id = f"{met.id}{suffix}"
+                    if ns_id not in org_met_cache:
+                        if community.metabolites.has_id(ns_id):
+                            org_met_cache[ns_id] = community.metabolites.get_by_id(ns_id)
+                        else:
+                            org_met_cache[ns_id] = cobra.Metabolite(
+                                id=ns_id,
+                                formula=getattr(met, "formula", None),
+                                name=f"{getattr(met, 'name', met.id) or met.id}{suffix}",
+                                charge=getattr(met, "charge", 0) or 0,
+                                compartment=getattr(met, "compartment", "c") or "c",
+                            )
+                    new_stoich[org_met_cache[ns_id]] = coeff
+
+            new_rxn.add_metabolites(new_stoich)
+            rxns_to_add.append(new_rxn)
+
         community.add_reactions(rxns_to_add)
 
+    n_intracellular = len(community.reactions) - len(added_exchange_ids)
     logger.debug(
         "Community model: %d reactions (%d exchange shared, %d intracellular namespaced)",
         len(community.reactions),
         len(added_exchange_ids),
-        len(community.reactions) - len(added_exchange_ids),
+        n_intracellular,
     )
     return community
 

@@ -330,11 +330,12 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
     # We test against COBRApy's registered solvers, NOT just whether highspy
     # is importable — optlang may not have the highs_interface even if highspy
     # is installed, which causes model.solver = "highs" to raise ValueError.
+    # NOTE: COBRApy/optlang exposes HiGHS as "hybrid", not "highs".
     _SOLVER = "glpk"
     try:
         import cobra.util.solver as _cs
-        if "highs" in _cs.solvers:
-            _SOLVER = "highs"
+        if "hybrid" in _cs.solvers:
+            _SOLVER = "hybrid"
     except Exception:
         pass
 
