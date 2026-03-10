@@ -397,43 +397,41 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
 
             # ── BNF mode detection ────────────────────────────────────────────
             # If the community contains ≥1 model patched with NITROGENASE_MO
-            # (scripts/patch_diazotroph_models.py), switch the FBA objective to
-            # maximise genuine NH3 efflux (EX_nh4_e) under N-limited media so
-            # that t1_target_flux is in mmol NH4/gDW/h — directly comparable to
-            # Reed 2011 field measurements and the BNF config threshold (0.01).
-            # Without NITROGENASE_MO (unpatched models), fall back to community
-            # biomass as a metabolic viability indicator (prior behaviour).
+            # (scripts/patch_diazotroph_models.py), measure genuine N2-fixation
+            # capacity via FVA on NITROGENASE_MO at 90% optimal growth.
+            #
+            # Strategy: keep biomass as the FBA objective (ensures metabolic
+            # realism — ATP/NADPH are bounded by carbon catabolism).  Only open
+            # the atmospheric N2 supply.  After FBA, FVA on NITROGENASE_MO gives
+            # the maximum fixation flux the community can sustain within 10% of
+            # its optimal growth.  t1_target_flux = fva_max × 2  (mmol NH4/gDW/h,
+            # since 1 N2 → 2 NH4+).  This is analogous to the acetylene-reduction
+            # assay (ARA) "potential" measure used in Reed 2011.
+            #
+            # Without NITROGENASE_MO (unpatched/non-diazotroph members), fall
+            # back to biomass as a metabolic viability proxy (prior behaviour).
+            #
             # NITROGENASE_MO IDs after _merge_community_models:
             #   org0 → "NITROGENASE_MO"
             #   orgN → "NITROGENASE_MO__orgN"
-            bnf_rxn_ids = [
-                r.id for r in community.reactions
+            nitr_rxns = [
+                r for r in community.reactions
                 if r.id == "NITROGENASE_MO" or r.id.startswith("NITROGENASE_MO__org")
             ]
-            bnf_mode = len(bnf_rxn_ids) > 0
+            bnf_mode = len(nitr_rxns) > 0
 
             if bnf_mode:
-                # Collect all EX_nh4_e reactions in the merged community.
-                nh4_ex_rxns = [
-                    r for r in community.reactions
-                    if r.id == "EX_nh4_e" or r.id.startswith("EX_nh4_e__org")
-                ]
-                # Ensure atmospheric N2 supply is open on all member exchanges.
+                # Open atmospheric N2 supply for all member EX_n2_e reactions.
+                # ub=0 was set by patch_diazotroph_models (uptake only); just
+                # ensure lb=-1000 is in place after any env constraint changes.
                 for r in community.reactions:
                     if r.id == "EX_n2_e" or r.id.startswith("EX_n2_e__org"):
                         r.lower_bound = -1000.0
-                # N-limited media: block external NH4 uptake so the community
-                # must fix its own nitrogen via NITROGENASE_MO.
-                for r in nh4_ex_rxns:
-                    if r.lower_bound < 0:
-                        r.lower_bound = 0.0
-                # Switch FBA objective to maximise community-level NH4 efflux.
-                if nh4_ex_rxns:
-                    community.objective = {r: 1.0 for r in nh4_ex_rxns}
-                target_rxns = nh4_ex_rxns
+                # FVA target: NITROGENASE_MO reactions (measures N2→NH3 capacity).
+                target_rxns = nitr_rxns
             else:
-                # No nitrogenase — use informational NH4 exchange for FVA bounds
-                # only; biomass (default objective) remains the pass/fail metric.
+                # No nitrogenase — use NH4 exchange as informational FVA target;
+                # biomass objective remains the pass/fail metric (prior behaviour).
                 target_rxns = _find_target_reactions(community, "nifH_pathway")
                 if not target_rxns:
                     try:
@@ -441,19 +439,17 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                     except KeyError:
                         pass
 
-            # FBA
+            # FBA — biomass objective in all cases (provides carbon/energy bound)
             solution = community.optimize()
             feasible = solution.status == "optimal"
 
-            if bnf_mode and target_rxns:
-                # Sum NH4 efflux across all member EX_nh4_e__orgN reactions.
-                # Positive flux = secretion (NH4 entering soil solution) by convention.
-                target_flux = float(max(0.0, sum(
-                    solution.fluxes.get(r.id, 0.0) for r in target_rxns
-                ))) if feasible else 0.0
-                flux_units = "mmol_nh4/gDW/h"
-                # Threshold from nitrogen-fixation-pipeline/config.yaml (Reed 2011)
-                t1_pass = feasible and target_flux >= 0.01
+            if bnf_mode:
+                # BNF pass/fail is determined by FVA (run below after this block).
+                # target_flux is set after FVA; use a placeholder for now.
+                target_flux = 0.0
+                flux_units = "mmol_nh4_equiv/gDW/h"
+                # Preliminary pass: feasible growth is a prerequisite.
+                t1_pass = feasible
             else:
                 # Biomass proxy: legacy behaviour for unpatched (non-diazotroph) models.
                 target_flux = float(max(0.0, solution.objective_value)) if feasible else 0.0
@@ -477,7 +473,15 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 except Exception:
                     pass
 
-            # Keystone analysis (only for T1-passing communities)
+            if bnf_mode:
+                # target_flux = max N2-fixation rate × 2 NH4+ per N2
+                # (analogous to acetylene-reduction assay potential, Reed 2011).
+                # fva_max is in mmol N2/gDW/h; × 2 gives mmol NH4-equiv/gDW/h.
+                target_flux = float(max(0.0, fva_max)) * 2.0
+                # BNF threshold from nitrogen-fixation-pipeline/config.yaml: 0.01 mmol NH4/gDW/h
+                t1_pass = feasible and target_flux >= 0.01
+
+
             keystone_taxa = []
             if t1_pass and target_flux > 1e-6:
                 target_rxn_ids = [rxn.id for rxn in target_rxns]
