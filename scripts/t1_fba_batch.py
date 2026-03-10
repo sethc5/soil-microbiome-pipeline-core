@@ -479,6 +479,14 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                     )
                     fva_min = float(fva_result["minimum"].mean())
                     fva_max = float(fva_result["maximum"].mean())
+                    # Apply biological ceiling: AGORA2 reversible reactions (ADK1,
+                    # G3PD, PTAr etc., lb=-1000) form thermodynamic ATP cycles under
+                    # the 90%-growth FVA objective, inflating fva_max beyond what the
+                    # glucose budget allows (~25 rxn/gDW/h = 50 mmol NH4-equiv/gDW/h).
+                    # Derived: 10 mmol_glucose * 40 ATP/glucose / 16 ATP per N2 = 25.
+                    from compute.community_fba import _BNF_NITROGENASE_FVA_RXN_CAP
+                    if bnf_mode and fva_max > _BNF_NITROGENASE_FVA_RXN_CAP:
+                        fva_max = _BNF_NITROGENASE_FVA_RXN_CAP
                 except Exception:
                     pass
 
