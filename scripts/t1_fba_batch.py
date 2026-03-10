@@ -395,33 +395,71 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             community.solver = _SOLVER
             _apply_environmental_constraints(community, metadata)
 
+            # ── BNF mode detection ────────────────────────────────────────────
+            # If the community contains ≥1 model patched with NITROGENASE_MO
+            # (scripts/patch_diazotroph_models.py), switch the FBA objective to
+            # maximise genuine NH3 efflux (EX_nh4_e) under N-limited media so
+            # that t1_target_flux is in mmol NH4/gDW/h — directly comparable to
+            # Reed 2011 field measurements and the BNF config threshold (0.01).
+            # Without NITROGENASE_MO (unpatched models), fall back to community
+            # biomass as a metabolic viability indicator (prior behaviour).
+            # NITROGENASE_MO IDs after _merge_community_models:
+            #   org0 → "NITROGENASE_MO"
+            #   orgN → "NITROGENASE_MO__orgN"
+            bnf_rxn_ids = [
+                r.id for r in community.reactions
+                if r.id == "NITROGENASE_MO" or r.id.startswith("NITROGENASE_MO__org")
+            ]
+            bnf_mode = len(bnf_rxn_ids) > 0
+
+            if bnf_mode:
+                # Collect all EX_nh4_e reactions in the merged community.
+                nh4_ex_rxns = [
+                    r for r in community.reactions
+                    if r.id == "EX_nh4_e" or r.id.startswith("EX_nh4_e__org")
+                ]
+                # Ensure atmospheric N2 supply is open on all member exchanges.
+                for r in community.reactions:
+                    if r.id == "EX_n2_e" or r.id.startswith("EX_n2_e__org"):
+                        r.lower_bound = -1000.0
+                # N-limited media: block external NH4 uptake so the community
+                # must fix its own nitrogen via NITROGENASE_MO.
+                for r in nh4_ex_rxns:
+                    if r.lower_bound < 0:
+                        r.lower_bound = 0.0
+                # Switch FBA objective to maximise community-level NH4 efflux.
+                if nh4_ex_rxns:
+                    community.objective = {r: 1.0 for r in nh4_ex_rxns}
+                target_rxns = nh4_ex_rxns
+            else:
+                # No nitrogenase — use informational NH4 exchange for FVA bounds
+                # only; biomass (default objective) remains the pass/fail metric.
+                target_rxns = _find_target_reactions(community, "nifH_pathway")
+                if not target_rxns:
+                    try:
+                        target_rxns = [community.reactions.get_by_id("EX_nh4_e")]
+                    except KeyError:
+                        pass
+
             # FBA
             solution = community.optimize()
             feasible = solution.status == "optimal"
 
-            # T1 target flux: use community biomass growth rate (objective value).
-            # AGORA2-style reference models do not include an explicit nitrogenase
-            # reaction — rxn00006 in these models maps to catalase and N2 is not
-            # a metabolite. Biomass production rate under soil environmental
-            # constraints is therefore the most meaningful metabolic viability
-            # indicator achievable with these models. N2-fixation specificity is
-            # already captured upstream by the T0.25 functional gene scanner
-            # (nifH/nifD/nifK presence). T1 FBA confirms community-level metabolic
-            # growth potential under the target soil conditions.
-            target_flux = float(max(0.0, solution.objective_value)) if feasible else 0.0
-
-            # Identify informational N-related exchange reactions for FVA bounding.
-            # Fall back to EX_nh4_e (ammonium exchange) if no pattern hits.
-            target_rxns = _find_target_reactions(community, "nifH_pathway")
-            if not target_rxns:
-                try:
-                    target_rxns = [community.reactions.get_by_id("EX_nh4_e")]
-                except KeyError:
-                    pass
-
-            # Early T1 pass/fail — skip FVA + keystone on non-passing communities.
-            # Threshold 1e-3 gDW/gDW/h: nominal growth (GLPK default ATPM ~8 units).
-            t1_pass = feasible and target_flux > 1e-3
+            if bnf_mode and target_rxns:
+                # Sum NH4 efflux across all member EX_nh4_e__orgN reactions.
+                # Positive flux = secretion (NH4 entering soil solution) by convention.
+                target_flux = float(max(0.0, sum(
+                    solution.fluxes.get(r.id, 0.0) for r in target_rxns
+                ))) if feasible else 0.0
+                flux_units = "mmol_nh4/gDW/h"
+                # Threshold from nitrogen-fixation-pipeline/config.yaml (Reed 2011)
+                t1_pass = feasible and target_flux >= 0.01
+            else:
+                # Biomass proxy: legacy behaviour for unpatched (non-diazotroph) models.
+                target_flux = float(max(0.0, solution.objective_value)) if feasible else 0.0
+                flux_units = "gDW/gDW/h"
+                # Nominal growth threshold under soil-constrained media.
+                t1_pass = feasible and target_flux > 1e-3
 
             # FVA (only for T1-passing communities)
             # processes=1: we are already parallelised at the batch level via
@@ -467,7 +505,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 "t1_target_flux": target_flux,
                 "t1_flux_lower_bound": fva_min,
                 "t1_flux_upper_bound": fva_max,
-                "t1_flux_units": "mmol/gDW/h",
+                "t1_flux_units": flux_units,
                 "t1_feasible": feasible,
                 "t1_keystone_taxa": json.dumps(keystone_taxa),
                 "t1_genome_completeness_mean": quality.get("genome_completeness_mean", 0.0),
