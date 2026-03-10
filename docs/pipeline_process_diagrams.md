@@ -127,7 +127,7 @@ flowchart TB
 
     subgraph T025BOX["③ T0.25 — ML Prediction  (SKIPPED ⚠)"]
         T025SKIP["functional_predictor.py\npicrust2_runner.py\nhumann3_shortcut.py\n— scripts exist, NOT RUN"]:::skip
-        T025WHY["WHY SKIPPED\n16S amplicon → insufficient\nresolution for HUMAnN3.\nPICRUSt2 possible but not wired\ninto BNF config yet.\nML model untrained on BNF target.\nCost: go directly T0→T1 and\naccept higher T1 load."]:::warn
+        T025WHY["WHY SKIPPED\nHUMAnN3 = shotgun only; N/A here.\nPICRUSt2 works on 16S but not\nwired into BNF config.\nNo BNF ML model trained yet.\nDecision: skip T0.25, accept\nhigher T1 candidate load."]:::warn
     end
 
     subgraph T1BOX["④ T1 — Metabolic Modeling  (IN PROGRESS 🔄)"]
@@ -139,21 +139,21 @@ flowchart TB
         T1P{"target_flux\n≥ 0.01 mmol\nNH4/gDW/h?"}
         T1W1["⚠ DIVERGENCE: genus proxy\nAll Bradyrhizobium → one SBML.\nStrain-level metabolic variation\nlost. Pre-built models not\nsample-specific.\nReason: CarveMe requires shotgun\nMAGs not yet available."]:::warn
         T1W2["🐛 BUG HISTORY (all fixed)\n① Biomass objective used as\n   BNF proxy — no nitrogenase\n   in AGORA2 models\n② EX_nh4_e objective → LP\n   saturation at 1000 mmol/gDW/h\n   (extracellular pools not shared)\n③ Complete medium (357 open\n   exchanges) → ATP-unbounded\n   FVA: 100–400 mmol/gDW/h\n→ Fixed: ad31e7b minimal medium"]:::bug
-        T1RUN["PID 559725 running\n4,897 communities · 32 workers\nhetzner2 · ~35 min ETA"]:::done
+        T1RUN["PID 559725 · batch 823/980\n4,115 written · 3,815 T1-pass\nhetzner2 · nearly complete"]:::done
     end
 
     subgraph T2BOX["⑤ T2 — Dynamics  (PARTIAL ⚠)"]
         T2A["dFBA time-course\ndfba_runner.py\nclimate perturbation"]
         T2B["Stability scoring\nstability_analyzer.py"]
         T2P{"t2_pass?"}
-        T2DONE["20,000 synthetic communities\nt2_bnf_trajectory complete ✅"]:::done
+        T2DONE["20,000 synthetic communities\nt2_bnf_trajectory populated\n(t1_pass not stored for synthetic;\nseparate validation path)"]:::done
         T2PEND["Real community T2\nNOT YET RUN\nQueued after T1 completes"]:::skip
         T2WHY["WHY PARTIAL\nT2 dFBA needs stable T1 flux\nas initial conditions. Ran\nsynthetic first to validate\ndFBA model parameters.\nReal communities blocked\nuntil T1 BNF fix resolves."]:::warn
         T2INT["⚠ MISSING: Intervention screening\nbioinoculant_screen · amendment_model\nestablishment_predictor\n— all scripts exist, none wired\ninto BNF pipeline config yet"]:::skip
     end
 
     subgraph OUTBOX["⑥ OUTPUT — Current State"]
-        O1["856 NEON t1_pass\n(non-diazotroph, biomass proxy)\n+ BNF results pending"]
+        O1["3,899 real t1_pass (NEON 3,823 + MGnify 76)\n1,041 non-BNF · gDW/gDW/h biomass proxy\n3,142 BNF · avg 44.4 mmol NH4-equiv/gDW/h\n⚠ max 108 in multi-diazotroph communities"]
         O2["FINDINGS.md\nserver-local only\nnot yet committed to repo"]:::warn
         O3["No intervention report\nintervention_report.py exists\nbut no T2 intervention data"]:::skip
         O4["No field validation package"]:::skip
@@ -200,11 +200,12 @@ flowchart TB
 | Pipeline Step | Ideal | Current | Reason |
 |---|---|---|---|
 | **Ingestion** | Shotgun metagenomes from SRA (millions) | 16S amplicon from NEON + MGnify (17.7k) | 16S data available first via cleaner APIs; SRA shotgun pipeline not yet triggered |
-| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | **Skipped entirely** | 16S lacks HUMAnN3 resolution; ML model not trained; cost decision to go T0→T1 directly |
+| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | **Skipped entirely** | HUMAnN3 requires shotgun (not applicable). PICRUSt2 works on 16S but not wired into BNF config and no BNF target ML model trained. Cost decision to skip T0.25 and accept extra T1 load. |
 | **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML per genus (20 genera) | CarveMe requires shotgun MAGs; genus-level proxy loses strain metabolic variation |
 | **T1 nitrogenase** | Present in genome-derived models | **Had to patch 9 genera** via `patch_diazotroph_models.py` | AGORA2 models lack explicit nitrogenase; not a catalogued reaction in AGORA2 template |
 | **T1 medium** | N-limited minimal medium from the start | Initially complete medium (357 open exchanges) → **3 iterations to fix** | Default AGORA2 medium is complete; ATP-saturation wasn't obvious until test values hit 100+ mmol/gDW/h |
 | **T1 objective** | FVA on NITROGENASE_MO from the start | Biomass proxy → EX_nh4_e (LP sat) → FVA on NITROGENASE_MO | Community FBA extracellular pool architecture not shared — learned empirically |
 | **T2 real communities** | Run after T1 completes | **Synthetic only** (20k communities) | T1 BNF flux values were unreliable until ad31e7b; holding T2 real until T1 stabilises |
 | **T2 intervention screening** | Full bioinoculant + amendment screen | **Not implemented** | Scripts exist (`intervention_screener.py`, `establishment_predictor.py`) but not wired into BNF config; blocked downstream of T2 real community run |
-| **Output** | Ranked communities + intervention report + field package | 856 t1_pass (non-BNF) + BNF pending; no intervention report | Intervention report requires T2 intervention data which requires T2 real which requires stable T1 |
+| **Output** | Ranked communities + intervention report + field package | 3,899 real t1_pass (3,823 NEON + 76 MGnify); 1,041 non-BNF biomass-proxy + 3,142 BNF (avg 44.4, max 108 mmol NH4-equiv/gDW/h — max warrants monitoring); no intervention report | Intervention report requires T2 intervention data which requires T2 real which requires stable T1 BNF values |
+| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.4 ✅ but max 108 seen in multi-diazotroph communities | Multi-diazotroph communities may pool carbon across members beyond the single-organism ceiling; non-N carbon sources (fatty acids etc) not fully blocked by current minimal medium whitelist |
