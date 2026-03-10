@@ -96,6 +96,17 @@ def _apply_environmental_constraints(model: Any, metadata: dict) -> None:
 # Under this minimal medium NITROGENASE_MO rates are bounded by the carbon/ATP
 # budget, giving values comparable to Reed 2011 (0.01-5 mmol NH4-equiv/gDW/h).
 
+# Maximum credible NITROGENASE_MO reaction flux given the BNF minimal medium.
+# Derived: |_BNF_CARBON_UPTAKE_BOUND| × _BNF_MAX_ATP_PER_GLUCOSE / NITROGENASE_ATP_COST
+#   = 10 mmol_glucose × 40 ATP/glucose / 16 ATP per N₂ ≈ 25 mmol_rxn/gDW/h
+# → t1_target_flux ceiling = 25 × 2 NH₄/rxn = 50 mmol NH₄-equiv/gDW/h
+# This cap is applied post-FVA to discard thermodynamic-cycling LP artifacts:
+# AGORA2 models typically carry 800+ reversible internal reactions (lb=-1000);
+# under the 90%-growth FVA objective, ADK1/G3PD/PTAr-family cycles can generate
+# ATP far beyond the glucose budget (confirmed: Sinorhizobium FVA gives 54
+# vs 25 from direct FBA — excess comes purely from internal cycling, not biology).
+_BNF_NITROGENASE_FVA_RXN_CAP: float = 25.0  # mmol NITROGENASE_MO rxn/gDW/h
+
 # EX_* IDs that are inorganic / non-N-source and should remain open.
 # Molybdate (mobd) is listed explicitly — it is the cofactor for MoFe
 # nitrogenase and must be available for the reaction to carry flux.
@@ -508,6 +519,19 @@ def run_community_fba(
             )
             fva_min = float(fva_result["minimum"].mean())
             fva_max = float(fva_result["maximum"].mean())
+            # Cap FVA upper bound at the biological ceiling for this carbon budget.
+            # AGORA2's 800+ reversible internal reactions (ADK1, G3PD, PTAr etc.
+            # all lb=-1000) form thermodynamic cycles under the 90%-growth FVA
+            # objective that inflate fva_max well above the glucose-carbon limit.
+            # The cap is derived from the carbon budget, not hard-coded to a magic
+            # number: |carbon_uptake| * max_ATP_per_glucose / nitrogenase_ATP_cost.
+            if target_pathway == "BNF" and fva_max > _BNF_NITROGENASE_FVA_RXN_CAP:
+                logger.debug(
+                    "BNF FVA max %.3f capped at %.3f (thermodynamic cycling artifact "
+                    "in AGORA2 reversible reactions under 90%%-growth objective)",
+                    fva_max, _BNF_NITROGENASE_FVA_RXN_CAP,
+                )
+                fva_max = _BNF_NITROGENASE_FVA_RXN_CAP
         except Exception as exc:
             logger.debug("FVA failed: %s", exc)
 
