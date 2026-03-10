@@ -123,13 +123,25 @@ _BNF_INORGANIC_EXCHANGES: frozenset[str] = frozenset({
     "EX_cl_e",       # Cl⁻
     "EX_sel_e",      # selenium (selenocysteine)
     "EX_ni2_e",      # Ni²⁺
-    "EX_thm_e",      # thiamine
-    "EX_ribflv_e",   # riboflavin
-    "EX_btn_e",      # biotin
-    "EX_fol_e",      # folate
-    "EX_pnto__R_e",  # pantothenate
     "EX_n2_e",       # N₂ (opened separately in t1_fba_batch.py)
 })
+
+# Organic cofactors / vitamins that contain carbon but are needed in trace amounts.
+# These are kept separate from _BNF_INORGANIC_EXCHANGES so they can be reopened
+# at a tiny biological uptake rate (-0.001 mmol/gDW/h) rather than the AGORA2
+# complete-medium value (-1000 mmol/gDW/h).  At -1000 the LP catabolises them as
+# bulk carbon sources, inflating NITROGENASE_MO flux far above the glucose ceiling.
+# At -0.001 they satisfy biosynthetic cofactor demand without providing net ATP.
+_BNF_COFACTOR_EXCHANGES: frozenset[str] = frozenset({
+    "EX_thm_e",      # thiamine   (C12H17N4OS)
+    "EX_ribflv_e",   # riboflavin (C17H20N4O6)
+    "EX_btn_e",      # biotin     (C10H16N2O3S)
+    "EX_fol_e",      # folate     (C19H17N7O6)
+    "EX_pnto__R_e",  # pantothenate (C9H17NO5)
+})
+# Maximum uptake rate for cofactors in BNF minimal medium (mmol/gDW/h).
+# Small enough to cover biosynthetic demand; too small to drive net catabolism.
+_BNF_COFACTOR_UPTAKE_BOUND: float = -0.001
 
 # Ordered list of BIGG carbon source EX_ IDs to try for the primary C slot.
 # Only the FIRST one found in the model is opened; all others remain closed.
@@ -172,8 +184,12 @@ def _apply_bnf_minimal_medium(community: Any) -> None:
     Strategy
     --------
     1.  Close ALL EX_* exchanges (set lb = 0 for any with lb < 0).
-    2.  Re-open safe inorganic exchanges (_BNF_INORGANIC_EXCHANGES) at their
+    2a. Re-open truly inorganic exchanges (_BNF_INORGANIC_EXCHANGES) at their
         existing bounds (already pH-scaled by _apply_environmental_constraints).
+    2b. Re-open organic cofactor exchanges (_BNF_COFACTOR_EXCHANGES) at a trace
+        cap (_BNF_COFACTOR_UPTAKE_BOUND = -0.001 mmol/gDW/h).  These vitamins
+        contain carbon but must NOT be used as bulk C sources — capping prevents
+        the LP from catabolising them for ATP (which inflated FVA to 100–400).
     3.  Re-open the first available primary carbon source at
         _BNF_CARBON_UPTAKE_BOUND (-10 mmol/gDW/h).
     4.  Leave all N-source exchanges CLOSED (nh4, no3, urea, amino-acid N) so
@@ -188,12 +204,18 @@ def _apply_bnf_minimal_medium(community: Any) -> None:
             original_bounds[rxn.id] = rxn.lower_bound
             rxn.lower_bound = 0.0
 
-    # Step 2: re-open inorganic exchanges (cap at -100 in case env-adjusted)
+    # Step 2a: re-open truly inorganic exchanges at env-scaled bounds
     for rxn in community.reactions:
         base_id = rxn.id.split("__org")[0]  # strip organism suffix if any
         if base_id in _BNF_INORGANIC_EXCHANGES:
             orig = original_bounds.get(rxn.id, -1000.0)
             rxn.lower_bound = max(orig, -1000.0)  # retain env-constraint scaling
+
+    # Step 2b: re-open organic cofactors at trace cap only — NOT as bulk C sources
+    for rxn in community.reactions:
+        base_id = rxn.id.split("__org")[0]
+        if base_id in _BNF_COFACTOR_EXCHANGES:
+            rxn.lower_bound = _BNF_COFACTOR_UPTAKE_BOUND
 
     # Step 3: open first available primary carbon source at ≤10 mmol/gDW/h
     carbon_opened = False
@@ -207,11 +229,13 @@ def _apply_bnf_minimal_medium(community: Any) -> None:
 
     if not carbon_opened:
         # Fallback: use the first carbon-containing exchange that was open
-        # originally.  Identify by checking original_bounds for any EX_*
-        # that is not in the inorganic whitelist and not an N source.
+        # originally.  Skip inorganic whitelist, cofactor set, and N sources —
+        # only open genuine bulk organic carbon sources.
         for rxn_id, orig_lb in original_bounds.items():
             base_id = rxn_id.split("__org")[0]
             if base_id in _BNF_INORGANIC_EXCHANGES:
+                continue
+            if base_id in _BNF_COFACTOR_EXCHANGES:  # skip C-containing cofactors
                 continue
             if any(base_id.startswith(p) for p in _BNF_N_SOURCE_PREFIXES):
                 continue
