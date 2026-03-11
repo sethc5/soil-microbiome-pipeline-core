@@ -1,38 +1,41 @@
 # Pipeline Findings — config.example
-_Generated: 2026-03-09 14:32 UTC_
+_Generated: 2026-03-11 02:45 UTC_
 
 ## Run Summary
-- Communities screened: **450444**
-- T0 passed: **444362**
-- T1 metabolic models built: **20000**
-- T2 dynamics simulated: **20000**
-- Top target function flux: **1000** (community 60655)
+- Communities screened: **457662**
+- T0 passed: **451122**
+- T1 metabolic models built: **4958**
+- T2 dynamics simulated: **24491**
+- Top target function flux: **378.4** (community 442609)
 
 ## Correlation Patterns
-- **ph** shows weak positive correlation with target function flux (Spearman r = 0.0172, n = 20000)
-- **temperature** shows weak positive correlation with target function flux (Spearman r = 0.0007, n = 20000)
-- **latitude** shows weak positive correlation with target function flux (Spearman r = 0.0214, n = 20000)
-- **longitude** shows weak negative correlation with target function flux (Spearman r = -0.0092, n = 20000)
+- **ph** shows weak positive correlation with target function flux (Spearman r = 0.2536, n = 4790)
+- **latitude** shows weak negative correlation with target function flux (Spearman r = -0.0812, n = 4954)
+- **longitude** shows weak negative correlation with target function flux (Spearman r = -0.0622, n = 4954)
+- acidic (< 5.5): mean top intervention confidence = 0.00 (n=2322)
+- neutral (5.5–7): mean top intervention confidence = 0.00 (n=1389)
+- alkaline (> 7): mean top intervention confidence = 0.00 (n=643)
 
 ## Enriched Taxa (Top 10 by significance)
-- **Arthrobacter** — fold-change 0.32×, p_adj = 0
-- **Frankia** — fold-change 0.61×, p_adj = 0
-- **Gemmata** — fold-change 3.76×, p_adj = 0
-- **Nitrospira** — fold-change 1.48×, p_adj = 0
-- **Nocardia** — fold-change 0.35×, p_adj = 0
-- **Planctomyces** — fold-change 0.38×, p_adj = 0
-- **Rhizobium** — fold-change 1.21×, p_adj = 0
-- **Herbaspirillum** — fold-change 1.13×, p_adj = 1.01e-14
-- **Burkholderia** — fold-change 1.13×, p_adj = 3.53e-13
-- **Acidobacterium** — fold-change 0.68×, p_adj = 3.58e-13
+- **Acidobacteriota** — fold-change 0.37×, p_adj = 0
+- **Bacteroidota** — fold-change 0.57×, p_adj = 0
+- **Chloroflexota** — fold-change 1.13×, p_adj = 0
+- **Deinococcota** — fold-change 6.02×, p_adj = 0
+- **Gemmatimonadota** — fold-change 1.76×, p_adj = 0
+- **Nitrososphaerota** — fold-change 8.15×, p_adj = 0
+- **Nitrospirota** — fold-change 2.05×, p_adj = 0
+- **Pseudomonadota** — fold-change 0.44×, p_adj = 0
+- **Thermodesulfobacteriota** — fold-change 0.38×, p_adj = 0
+- **Thermomicrobiota** — fold-change 5.91×, p_adj = 0
 
 ## BNF Temporal Stability (dFBA Trajectories)
-- 20,000 communities tracked over 30-day dFBA simulations
-- Mean peak BNF flux: **0.0851** mmol/gDW/h  (max: 0.1407)
-- Mean retention (day-60 vs day-30): **88.3%**  (3.1% fully stable ≥90%)
-- Highest peak BNF: community **174015**  (peak=0.1407, retention=91.1%, site=KONZ, land=grassland)
-- Most stable BNF: community **109020**  (retention=97.6%, peak=0.1155, site=KONA)
+- 23,378 communities tracked over 30-day dFBA simulations
+- Mean peak BNF flux: **4.9490** mmol/gDW/h  (max: 38.6279)
+- Mean retention (day-60 vs day-30): **90.0%**  (17.1% fully stable ≥90%)
+- Highest peak BNF: community **450825**  (peak=38.6279, retention=100.0%, site=CLBJ, land=)
+- Most stable BNF: community **445137**  (retention=100.0%, peak=36.8628, site=GUAN)
 - Mean peak BNF by land use:
+  - unknown: 33.7469
   - rangeland: 0.0912
   - grassland: 0.0881
   - cropland: 0.0831
@@ -63,9 +66,9 @@ _Detail: `results/keystone_analysis.csv`, `results/keystone_organism_summary.csv
 _Detail: `results/intervention_type_summary.csv`_
 
 ## Pipeline Funnel Efficiency
-- Total communities entered: **441,942**
-- T0 quality filter: **441,942** pass (100%)
-- T0.25 ML scoring: **441,942** pass (100% of T0)
+- Total communities entered: **449,648**
+- T0 quality filter: **443,566** pass (99%)
+- T0.25 ML scoring: **443,564** pass (100% of T0)
 - T1 community FBA: **20,000** pass (4% of T0.25) — the primary discriminating filter
 - T2 dFBA stability: **20,000** pass (100% of T1)
 - FVA worst-case flux |lower bound| by land use:
@@ -80,7 +83,7 @@ _Detail: `results/funnel_analysis.json`, `results/fva_uncertainty.csv`_
 ## Data Confidence & Production Readiness
 
 ### What this pipeline can currently produce
-- Systematic ranking of 20,000 synthetic + 4362 real community configurations for BNF potential
+- Systematic ranking of 4,958 synthetic + 11122 real community configurations for BNF potential
 - Mechanistic identification of keystone taxa using leave-one-out FBA
 - Intervention cost-effectiveness comparison across amendment, bioinoculant, and management strategies
 - BNF temporal stability profiling via dFBA trajectory analysis
@@ -92,17 +95,17 @@ Real NEON samples have OTU classifications — functional predictions are data-g
 #### Confidence by data source
 | Source | Samples | Confidence |
 |--------|---------|------------|
-| MGNIFY | 796 | MEDIUM |
-| NEON | 9,648 | MEDIUM — real metadata + 16S phylum profiles classified |
+| MGNIFY | 95 | MEDIUM |
+| NEON | 17,567 | MEDIUM — real metadata + 16S phylum profiles classified |
 | Synthetic | 220,000 | LOW — placeholder genomes |
 
 #### Real-data progress
-- **NEON samples ingested**: 9,648 across 20 field sites
-- **NEON soil pH populated**: 9,346 / 9,648 samples ✓
-- **NEON T0-pass (16S classified)**: 4,362 / 9,648 ✓
-- **NEON T0.25 scored**: 4,360 / 4,362 T0-pass communities ✓
-- **MGnify FTP ingested**: 796 soil communities (EBI amplicon-pipeline-v6) ✓
-- **MGnify T0-pass**: 796 / 796 ✓
+- **NEON samples ingested**: 17,567 across 20 field sites
+- **NEON soil pH populated**: 17,235 / 17,567 samples ✓
+- **NEON T0-pass (16S classified)**: 11,122 / 17,567 ✓
+- **NEON T0.25 scored**: 3,659 / 11,122 T0-pass communities ✓
+- **MGnify FTP ingested**: 95 soil communities (EBI amplicon-pipeline-v6) ⏳ pending
+- **MGnify T0-pass**: 95 / 95 ⏳ pending
 - **SRA tools**: installed (v3.x) ✓
 - **PICRUSt2**: installed (v2.6.3) ✓
 - **vsearch**: installed (v2.30.x) ✓
@@ -110,12 +113,12 @@ Real NEON samples have OTU classifications — functional predictions are data-g
 ### Remaining gaps to high-value production
 | Gap | Status | Impact |
 |-----|--------|--------|
-| NEON 16S classification (vsearch+SILVA) | ✓ Complete — 4362/9648 samples | Real phylum profiles → genuine FBA inputs |
-| NEON T0.25 ML scoring | ✓ Complete — 4360/4362 T0-pass communities scored | function_score computed for all T0-pass NEON communities |
+| NEON 16S classification (vsearch+SILVA) | ✓ Complete — 11122/17567 samples | Real phylum profiles → genuine FBA inputs |
+| NEON T0.25 ML scoring | ✓ Complete — 3659/11122 T0-pass communities scored | function_score computed for all T0-pass NEON communities |
 | PICRUSt2 functional profiling on NEON OTUs | N/A — vsearch 16S pipeline outputs phylum profiles, not OTU BIOM tables | Would require pipeline restructuring |
 | T1 FBA for real NEON T0-pass communities | Not started — needs genus-level assignments (shotgun 16S gives ~99.9% Unclassified) | First real metabolic flux predictions |
 | Real genome-scale models (AGORA2/MICOM) | Not started | Replaces synthetic FBA → raises to HIGH |
-| MGnify FTP ingest (v6 amplicon) | ✓ Complete — 796 soil communities via ftp.ebi.ac.uk (no proxy needed) | Real 16S phylum profiles from curated EBI pipeline |
+| MGnify FTP ingest (v6 amplicon) | ⏳ running — direct EBI FTP, no WAF block | Real 16S phylum profiles from curated EBI pipeline |
 | GTDB-Tk + CheckM genome annotation | Not started | Raises model confidence to medium/high |
 
 ### Path to high-value output
@@ -127,5 +130,5 @@ With NEON 16S OTU profiles complete + PICRUSt2 functional annotation, the pipeli
 - Enrichment analysis is limited to taxa present in the T0.25 functional profile.
 - All computational predictions require wet-lab validation before field application.
 
-_Ranked candidates: `/data/pipeline/results/ranked_candidates.csv`_
-_Intervention report: `/data/pipeline/results/intervention_report.md`_
+_Ranked candidates: `results/ranked_candidates.csv`_
+_Intervention report: `results/intervention_report.md`_
