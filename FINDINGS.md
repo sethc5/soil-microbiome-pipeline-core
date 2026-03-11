@@ -1,5 +1,5 @@
 # Pipeline Findings — config.example
-_Generated: 2026-03-11 02:45 UTC_
+_Generated: 2026-03-11 02:53 UTC_
 
 ## Run Summary
 - Communities screened: **457662**
@@ -42,6 +42,17 @@ _Generated: 2026-03-11 02:45 UTC_
   - wetland: 0.0787
   - forest: 0.0773
 _BNF trajectory detail: `results/bnf_trajectory_summary.csv`_
+
+## Spatial Distribution & BNF Kriging
+- **200** communities grouped into **7** spatial clusters (k-means on lat/lon + BNF flux)
+- Kriging interpolation: **6,413** CONUS grid points — mean 37.16, max 45.07 mmol NH₄/gDW/h
+- Top clusters by mean BNF flux:
+  - Cluster 0: n=16, centroid (18.0°N, -67.0°E), mean flux 311.0, max 378.4
+  - Cluster 2: n=13, centroid (40.1°N, -77.8°E), mean flux 278.4, max 357.3
+  - Cluster 3: n=10, centroid (40.3°N, -100.3°E), mean flux 268.1, max 324.4
+  - Cluster 1: n=10, centroid (40.7°N, -121.5°E), mean flux 264.2, max 378.4
+  - Cluster 4: n=19, centroid (32.8°N, -105.4°E), mean flux 256.6, max 324.4
+_Map: `results/spatial/bnf_spatial_map.png`  Kriging grid: `results/bnf_kriging_grid_conus.csv`_
 
 ## Keystone Taxa & Community Architecture
 - 20,000 T1-pass communities analyzed for keystone architecture

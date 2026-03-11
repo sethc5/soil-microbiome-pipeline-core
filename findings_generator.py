@@ -218,6 +218,54 @@ def _bnf_trajectory_summary(results_dir: Path) -> dict | None:
     }
 
 
+def _spatial_summary(results_dir: Path) -> dict | None:
+    """Load spatial cluster stats + kriging grid to return summary dict."""
+    cluster_path = results_dir / "spatial" / "spatial_clusters.csv"
+    kriging_path = results_dir / "bnf_kriging_grid_conus.csv"
+    if not cluster_path.exists():
+        return None
+    import csv
+    clusters = []
+    with open(cluster_path) as fh:
+        for row in csv.DictReader(fh):
+            try:
+                clusters.append({
+                    "cluster":      int(row["cluster"]),
+                    "n":            int(row["n_communities"]),
+                    "centroid_lat": float(row["centroid_lat"]),
+                    "centroid_lon": float(row["centroid_lon"]),
+                    "mean_flux":    float(row["mean_flux"]),
+                    "max_flux":     float(row["max_flux"]),
+                })
+            except (ValueError, KeyError):
+                pass
+    if not clusters:
+        return None
+    clusters_sorted = sorted(clusters, key=lambda x: -x["mean_flux"])
+    kriging_stats: dict = {}
+    if kriging_path.exists():
+        fluxes = []
+        with open(kriging_path) as fh:
+            for row in csv.DictReader(fh):
+                try:
+                    fluxes.append(float(row["interp_bnf_flux_mmol_nh4_per_gdw_per_h"]))
+                except (ValueError, KeyError):
+                    pass
+        if fluxes:
+            kriging_stats = {
+                "n_grid_points": len(fluxes),
+                "mean": sum(fluxes) / len(fluxes),
+                "max":  max(fluxes),
+                "min":  min(fluxes),
+            }
+    return {
+        "n_clusters":   len(clusters),
+        "total_comms":  sum(c["n"] for c in clusters),
+        "clusters":     clusters_sorted,
+        "kriging":      kriging_stats,
+    }
+
+
 def _render_findings_md(
     config_path: Path,
     db_summary: dict,
@@ -228,6 +276,7 @@ def _render_findings_md(
     keystone: dict | None = None,
     intervention_portfolio: dict | None = None,
     fva_funnel: dict | None = None,
+    spatial: dict | None = None,
 ) -> str:
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
@@ -318,6 +367,35 @@ def _render_findings_md(
     else:
         lines.append(
             "- *Not yet computed. Run `scripts/bnf_trajectory_analysis.py` first.*"
+        )
+
+    # ── Spatial Distribution & Kriging ────────────────────────────────────
+    lines += ["", "## Spatial Distribution & BNF Kriging"]
+    if spatial:
+        k = spatial["kriging"]
+        lines.append(
+            f"- **{spatial['total_comms']}** communities grouped into "
+            f"**{spatial['n_clusters']}** spatial clusters (k-means on lat/lon + BNF flux)"
+        )
+        if k:
+            lines.append(
+                f"- Kriging interpolation: **{k['n_grid_points']:,}** CONUS grid points — "
+                f"mean {k['mean']:.2f}, max {k['max']:.2f} mmol NH₄/gDW/h"
+            )
+        lines.append("- Top clusters by mean BNF flux:")
+        for c in spatial["clusters"][:5]:
+            lines.append(
+                f"  - Cluster {c['cluster']}: n={c['n']}, "
+                f"centroid ({c['centroid_lat']:.1f}°N, {c['centroid_lon']:.1f}°E), "
+                f"mean flux {c['mean_flux']:.1f}, max {c['max_flux']:.1f}"
+            )
+        lines.append(
+            "_Map: `results/spatial/bnf_spatial_map.png`  "
+            "Kriging grid: `results/bnf_kriging_grid_conus.csv`_"
+        )
+    else:
+        lines.append(
+            "- *Not yet computed. Run `spatial_analysis.py` and `scripts/make_spatial_map.py` first.*"
         )
 
     lines += [
@@ -558,12 +636,14 @@ def generate(
     keystone = _keystone_summary(results_dir)
     intervention_portfolio = _intervention_portfolio_summary(results_dir)
     fva_funnel = _fva_funnel_summary(results_dir)
+    spatial = _spatial_summary(results_dir)
     md = _render_findings_md(
         config, db_summary, correlation_findings, enriched_taxa, results_dir,
         bnf_traj=bnf_traj,
         keystone=keystone,
         intervention_portfolio=intervention_portfolio,
         fva_funnel=fva_funnel,
+        spatial=spatial,
     )
     output.write_text(md)
     logger.info("FINDINGS.md written → %s", output)
