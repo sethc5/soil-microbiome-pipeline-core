@@ -6,7 +6,7 @@ A single gram of healthy soil contains ~10,000 bacterial species, ~200 meters of
 
 This pipeline provides systematic infrastructure to scan that space. The "candidates" here are not molecules or crystal structures — they are **microbial community compositions, functional guilds, and intervention strategies** (bioinoculants, amendments, land management practices) predicted to shift soil microbiome function toward a defined target state. The same 4-tier funnel logic from [biochem-pipeline-core](https://github.com/sethc5/biochem-pipeline-core), [materials-pipeline-core](https://github.com/sethc5/materials-pipeline-core), and [genomics-pipeline-core](https://github.com/sethc5/genomics-pipeline-core) applies — cheap filters first, expensive simulation last, everything logged to a database that accumulates scientific value over time.
 
-> **Status**: Architecture defined · Core pipeline in development · First instantiation: [nitrogen-fixation-pipeline](https://github.com/sethc5/nitrogen-fixation-pipeline) · [Contributors welcome](CONTRIBUTING.md)
+> **Status**: T1 + T2 complete · 4,491 real communities screened · BNF surrogate RF trained (ROC-AUC 0.812) · AGORA2 integration planned · [Contributors welcome](CONTRIBUTING.md)
 
 ---
 
@@ -515,6 +515,29 @@ spatial_analysis.py               — Geographic distribution of top communities
 intervention_report.py            — Generate actionable field recommendations
 findings_generator.py             — Anomaly detection, FINDINGS.md writer
 validate_pipeline.py              — Known community recovery test
+
+# ML surrogate + BNF utilities
+scripts/
+  train_bnf_surrogate.py          — Train RF surrogate BNF predictor from real FBA results (T0.25 Addition C)
+  make_reference_bnf.py           — Generate reference/bnf_measurements.csv from FBA flux data
+  track_site_bnf.py               — Time-series BNF trajectory per NEON site (multi-visit)
+  make_spatial_map.py             — CONUS BNF kriging heatmap + cluster scatter
+
+# Config instantiations
+configs/
+  config.example.yaml             — BNF reference config (template for new instantiations)
+  soil_carbon.yaml                — SOC sequestration instantiation
+  bioremediation.yaml             — Hydrocarbon bioremediation instantiation
+  carbon_sequestration.yaml       — Carbon sequestration instantiation
+
+# Curated literature knowledge base
+knowledge/                        — 28 curated domain reference files (see knowledge/INDEX.md)
+
+# Trained models
+models/
+  README.md                       — Feature documentation, training metrics, retrain schedule
+  bnf_surrogate_classifier.joblib — RF gate classifier (ROC-AUC 0.812, threshold=0.4)
+  bnf_surrogate_regressor.joblib  — RF flux regressor (R² 0.465)
 ```
 
 ---
@@ -754,7 +777,8 @@ python config_schema.py --validate path/to/config.yaml
 python validate_pipeline.py \
   --config config.yaml \
   --reference_communities reference/high_bnf_communities.biom \
-  --measured_function reference/bnf_measurements.csv
+  --measured_function reference/bnf_measurements.csv \
+  --model-path models/bnf_surrogate_classifier.joblib
 
 # Run T0 + T0.25 (fast, no metabolic modeling)
 python pipeline_core.py --config config.yaml --tier 025 -w 8
@@ -808,8 +832,8 @@ python intervention_report.py --config config.yaml --top 20
 
 | Repo | Target Function | Application | Status |
 |------|----------------|-------------|--------|
-| [nitrogen-fixation-pipeline](https://github.com/sethc5/nitrogen-fixation-pipeline) | BNF flux, nifH activity | Fertilizer reduction | 🔶 In development |
-| carbon-sequestration-pipeline | SOC accumulation rate | Climate mitigation | 📋 Planned |
+| [nitrogen-fixation-pipeline](https://github.com/sethc5/nitrogen-fixation-pipeline) | BNF flux, nifH activity | Fertilizer reduction | ✅ T1+T2 complete · 4,491 communities · surrogate trained |
+| carbon-sequestration-pipeline | SOC accumulation rate | Climate mitigation | 🔶 Config instantiated (`configs/soil_carbon.yaml`) |
 | bioremediation-pipeline | Hydrocarbon degradation flux | Contaminated site cleanup | 📋 Planned |
 | plant-growth-promotion-pipeline | Rhizosphere PGP activity | Crop yield improvement | 📋 Planned |
 | pathogen-suppression-pipeline | Disease suppressiveness score | Pesticide reduction | 📋 Planned |

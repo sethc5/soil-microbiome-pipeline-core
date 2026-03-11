@@ -93,7 +93,7 @@ flowchart TB
 
 ## 2 — Current Implementation
 
-What is actually running as of 2026-03-10 (latest commit `f8f0995`). Orange = skipped or constrained. Red = bugs (all fixed). Green = complete. Numbers from live DB query (`soil_microbiome.db`, 457,662 total runs).
+What is actually running as of 2026-03-10 (latest commit `25de5c8`). Orange = skipped or constrained. Red = bugs (all fixed). Green = complete. Numbers from live DB query (`soil_microbiome.db`, 457,662 total runs).
 
 ```mermaid
 flowchart TB
@@ -120,8 +120,8 @@ flowchart TB
         T0R["11,122 NEON pass\n95 MGnify pass\n440k synthetic pass\n→ 451,122 total t0_pass"]:::done
     end
 
-    subgraph T025["② T0.25 — ML PREDICTOR   SKIPPED — SURROGATE NOW TRAINABLE"]
-        T025S["functional_predictor.py\npicrust2_runner.py · humann3_shortcut.py\nAll scripts exist — NOT RUN\nHUMAnN3 = shotgun only; N/A here\nPICRUSt2 works on 16S but not wired\nNo BNF ML model trained — YET\n⚡ 3,378 real FBA results now available\nSurrogate RF predictor ready to train (Addition C)"]:::skip
+    subgraph T025["② T0.25 — ML PREDICTOR   SURROGATE TRAINED — RF classifier ROC-AUC 0.812"]
+        T025S["functional_predictor.py · predict_with_gate()\npicrust2_runner.py · humann3_shortcut.py\nSurrogate RF TRAINED on 5,907 real communities (cf5e081)\nClassifier gate: ROC-AUC 0.812 ± 0.012 · OOB 0.772\nRegressor: R² 0.465 ± 0.025 · OOB 0.469\nTop features: soil_ph (42%) · Nitrososphaerota (19%) · Nitrospirota (12%)\nModels: models/bnf_surrogate_classifier.joblib + bnf_surrogate_regressor.joblib\nNot yet called in pipeline_core.py T0.25 batch"]:::skip
     end
 
     subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   COMPLETE — 4,491 communities · 117 min"]
@@ -138,12 +138,12 @@ flowchart TB
     subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   COMPLETE — 117.5 min · 0 errors"]
         U2A["dFBA TIME COURSE\nt2_dfba_batch.py · 4,491 communities\nglpk enforced · climate perturbation panel\n23,378 trajectory records in DB"]:::unit
         U2B["STABILITY SCORER\nstability_analyzer.py\n3,378 t2_pass (stability ≥ 0.30)\nmean stability=0.87 · mean estab_prob=0.93"]:::unit
-        T2W["INTERVENTION ASSIGNMENT\nmetadata-driven picker (bbf03a4)\npH-amendment 58% · direct-inoculant 29%\ndiversity-enhancement 8% · drought-tolerant 5%\nNOTE: mechanistic intervention screener not yet wired"]:::warn
+        T2W["INTERVENTION ASSIGNMENT\nmetadata-driven picker (bbf03a4)\npH-amendment 58% · direct-inoculant 29%\ndiversity-enhancement 8% · drought-tolerant 5%\nT2 metadata enriched: 13 fields (1429734)\nsoil_ph, temp_c, OM%, clay%, precipitation_mm,\nland_use, management, sampling_fraction, site_id, climate_zone\nFlux-based t1_confidence: 0.30→0.85 linear scale\nMechanistic screener wired but AGORA2 models pending"]:::warn
         S2{{"SEPARATOR\nstability >= 0.30?"}}:::sep
     end
 
     P1[/"3,378 BNF t2_pass communities\nmax flux=50.0 avg=36.23 mmol NH4/gDW/h\nkeystone taxa + dFBA trajectories in DB\n6,413-point CONUS kriging grid"/]:::prod
-    P2[/"FINDINGS.md committed f8f0995\ncorrelation · taxa enrichment · spatial\n100 ranked candidates · 11 interventions"/]:::done
+    P2[/"FINDINGS.md committed 25de5c8\ncorrelation · taxa enrichment · spatial\n100 ranked candidates · 11 interventions"/]:::done
     P3["INTERVENTION REPORT generated (11 recs)\nFIELD PACKAGE: not yet built\nNext: mechanistic bioinoculant screen (T2 gap)"]:::warn
 
     W0["NEON: 6,445 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
@@ -295,13 +295,13 @@ flowchart TB
 |---|---|---|---|
 | **Input** | Shotgun metagenomes from SRA (millions) | 16S amplicon: NEON 17,567 + MGnify 95 + 440k synthetic | 16S APIs available first; SRA shotgun not yet triggered |
 | **T0 method** | Multi-source QC + functional gene scan | vsearch 16S → SILVA 138 classification only | Sufficient for 16S; functional gene scan deferred to T1 genus lookup |
-| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | Skipped entirely | HUMAnN3 is shotgun-only; PICRUSt2 not wired into BNF config; no trained model |
+| **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | Surrogate **trained**: RF classifier gate (ROC-AUC 0.812) + regressor (R² 0.465) on 5,907 real samples. `predict_with_gate()` wired. Not yet called by `pipeline_core.py` T0.25 batch | HUMAnN3 is shotgun-only; PICRUSt2 not wired into batch; surrogate awaits pipeline integration |
 | **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML, 20 genera on disk | CarveMe requires shotgun MAGs; genus-level proxy loses strain variation |
 | **T1 nitrogenase** | Present from annotation-driven model build | Patched into 9 genera via patch_diazotroph_models.py | AGORA2 template omits nitrogenase; not a catalogued AGORA2 reaction |
 | **T1 medium** | N-limited minimal medium from the start | 3 iterations to reach correct medium (commits 90f0e92 → 13ee41d → ad31e7b) | AGORA2 ships with complete medium; LP saturation and ATP-unbounded FVA not obvious until empirically observed |
 | **T1 results** | ~2,000 high-confidence metabolic hits | 4,491 real t1_pass (3,378 BNF + 1,113 non-BNF) — **COMPLETE** | max=50.0, avg=36.23 mmol NH₄/gDW/h; metabolite-ns namespace fix confirmed cap |
 | **T2 real** | Run after T1 completes | **COMPLETE** — 4,491 communities in 117.5 min, 0 errors | `scripts/t2_dfba_batch.py` built (f46a1a4); 3,378 t2_pass (stability ≥ 0.30) |
-| **T2 intervention** | Full bioinoculant + amendment screen | Metadata-driven picker deployed (bbf03a4); mechanistic screener not yet wired | `intervention_screener.py` exists but not wired; fixed monotony bug where all → drought-tolerant |
-| **Output** | Ranked communities + intervention report + field package | 100 ranked candidates · 11 interventions · FINDINGS.md committed (f8f0995) | Field validation package not yet built; mechanistic intervention screening is next gap |
+| **T2 intervention** | Full bioinoculant + amendment screen | Metadata-driven picker deployed (bbf03a4); 13-field metadata now passed (1429734): temp, OM%, clay%, precipitation, land_use, management, sampling_fraction, site_id, climate_zone; flux-based t1_confidence | `intervention_screener.py` wired with full metadata; mechanistic niche scoring awaits AGORA2 genus models |
+| **Output** | Ranked communities + intervention report + field package | 100 ranked candidates · 11 interventions · FINDINGS.md committed (25de5c8) | Field validation package not yet built; mechanistic intervention screening is next gap |
 | **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | max 50.0 (within expected range); avg 36.23 | Metabolite-ns namespace fix confirmed: shared atp_c was root cause; ceiling now capped at 50.0 by FVA cap constant |
 | **Solver safety** | Any FBA solver | glpk enforced everywhere (c78a0bd) | OSQP/hybrid hangs on AGORA2 models at fraction_of_optimum=0.0 (1,183 lb=-1000 reactions); documented and enforced |
