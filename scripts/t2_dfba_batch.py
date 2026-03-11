@@ -183,38 +183,61 @@ def _compute_functional_redundancy(top_genera: dict, model_dir: Path) -> float:
     return round(on_disk / len(top_genera), 4)
 
 
-def _pick_best_intervention(
-    perturbation_responses: list[dict],
-    baseline_flux: float,
+def _recommend_intervention(
+    meta: dict,
+    stability: float,
+    resistance: float,
+    resilience: float,
+    func_redundancy: float,
 ) -> tuple[str, float]:
-    """Return (intervention_name, effect_size) for the perturbation that produced
-    the highest flux *relative to baseline* — i.e., the one the community handled
-    best, suggesting that environment type is most favourable.
+    """Recommend a field intervention based on site metadata and dFBA metrics.
 
-    For fertilizer_pulse this is re-interpreted as 'N-amendment opportunity':
-    if the community responds strongly to N pulse, adding N is the best lever.
+    Previous approach (pick perturbation type with highest flux response) was
+    non-discriminating: drought universally "won" because reducing O2 import
+    marginally relieves nitrogenase O2-inhibition, giving every community the
+    same recommendation regardless of site conditions.
+
+    This approach instead maps site constraints to actionable levers:
+      pH suboptimal (< 5.5 or > 8.0)  → pH-amendment (lime/sulfur)
+      Very dry site (moisture < 0.05)  → drought-tolerant-inoculant
+      Poor recovery (resilience < 0.7) → moisture-management
+      Low model coverage (redundancy < 0.2) → diversity-enhancement
+      Robust community (stab ≥ 0.95, resist ≥ 0.9) → direct-inoculant
+      Moderate community                → consortium-optimization
+
+    intervention_effect = expected gain in establishment_prob from the
+    recommended action; approximated as (1 - current_establishment_headroom).
     """
-    if not perturbation_responses or baseline_flux < 1e-12:
-        return ("none", 0.0)
+    ph = meta.get("soil_ph")
+    moisture = meta.get("moisture_pct")
 
-    best_type = "none"
-    best_effect = -999.0
-    for r in perturbation_responses:
-        effect = (r["target_flux"] - baseline_flux) / baseline_flux
-        perturb_types = r.get("perturbation", ["unknown"])
-        ptype = perturb_types[0] if perturb_types else "unknown"
-        if effect > best_effect:
-            best_effect = effect
-            best_type = ptype
+    intervention = "consortium-optimization"  # default
 
-    # Translate fertilizer_pulse → actionable recommendation
-    label_map = {
-        "fertilizer_pulse":  "N-amendment",
-        "drought":           "drought-tolerant-inoculant",
-        "temperature_shock": "thermal-adapted-inoculant",
-        "none":              "none",
-    }
-    return label_map.get(best_type, best_type), round(float(best_effect), 4)
+    if ph is not None and (float(ph) < 5.5 or float(ph) > 8.0):
+        intervention = "pH-amendment"
+    elif moisture is not None and float(moisture) < 0.05:
+        intervention = "drought-tolerant-inoculant"
+    elif resilience < 0.70:
+        intervention = "moisture-management"
+    elif func_redundancy < 0.20:
+        intervention = "diversity-enhancement"
+    elif stability >= 0.95 and resistance >= 0.90:
+        intervention = "direct-inoculant"
+
+    # Effect size: approximate marginal improvement from intervention.
+    # For pH/moisture issues, assume fix restores ~25% of establishment headroom.
+    # For robust communities, direct inoculation has ~10% expected yield gain.
+    headroom = max(0.0, 1.0 - (stability * 0.5 + resistance * 0.3 + resilience * 0.2))
+    if intervention in ("pH-amendment", "drought-tolerant-inoculant", "moisture-management"):
+        effect = round(min(headroom * 0.25 + 0.05, 0.40), 4)
+    elif intervention == "direct-inoculant":
+        effect = round(0.08 + stability * 0.05, 4)
+    elif intervention == "diversity-enhancement":
+        effect = round(min(headroom * 0.15 + 0.03, 0.25), 4)
+    else:
+        effect = round(min(headroom * 0.10 + 0.02, 0.20), 4)
+
+    return intervention, effect
 
 
 def _compute_establishment_prob(
@@ -400,8 +423,8 @@ def _worker_batch(
             n_genera_modelled = len(member_models)
             func_redundancy = _compute_functional_redundancy(top_genera, model_dir_p)
 
-            best_intervention, intervention_effect = _pick_best_intervention(
-                perturb_responses, baseline_flux
+            best_intervention, intervention_effect = _recommend_intervention(
+                meta, stability_score, resistance, resilience, func_redundancy
             )
             establishment_prob = _compute_establishment_prob(
                 stability_score, resistance, resilience, meta
