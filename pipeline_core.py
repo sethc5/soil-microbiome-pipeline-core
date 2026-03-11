@@ -869,10 +869,15 @@ def _score_community_t025(
         try:
             feature_names = sorted(phylum_profile.keys())
             X = np.array([[phylum_profile.get(f, 0.0) for f in feature_names]])
-            score, uncertainty = predictor.predict(X[0])
-            result["t025_function_score"]       = float(score)
+            # Use predict_with_gate() so the ROC-AUC 0.812 classifier gate
+            # is applied before the regressor — communities with low BNF-pass
+            # probability are assigned score=0 and gate_pass=False immediately.
+            flux, uncertainty, gate_pass = predictor.predict_with_gate(X[0])
+            result["t025_function_score"]       = float(flux)
             result["t025_function_uncertainty"] = float(uncertainty)
-            result["t025_pathway_abundances"]   = json.dumps({"ml_score": score})
+            result["t025_pathway_abundances"]   = json.dumps(
+                {"ml_score": flux, "gate_pass": gate_pass}
+            )
         except Exception as exc:
             logger.debug("FunctionalPredictor failed on community %s: %s",
                          community_row.get("community_id"), exc)

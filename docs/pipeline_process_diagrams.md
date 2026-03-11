@@ -93,7 +93,7 @@ flowchart TB
 
 ## 2 — Current Implementation
 
-What is actually running as of 2026-03-10 (latest commit `25de5c8`). Orange = skipped or constrained. Red = bugs (all fixed). Green = complete. Numbers from live DB query (`soil_microbiome.db`, 457,662 total runs).
+What is actually running as of 2026-03-11 (latest commit). Orange = skipped or constrained. Red = bugs (all fixed). Green = complete. Numbers from live DB query (`soil_microbiome.db`, 237,662 total runs).
 
 ```mermaid
 flowchart TB
@@ -109,7 +109,7 @@ flowchart TB
 
     F1[/"NEON amplicon portal\n16S V4 · 17,567 samples\nneon_adapter.py"/]:::feed
     F2[/"EBI MGnify API\n16S amplicon · 95 studies\nmgnify_adapter.py"/]:::feed
-    F3[/"Synthetic communities\n440,000 generated\nmodel validation"/]:::feed
+    F3[/"Synthetic communities\n220,000 generated\nmodel validation"/]:::feed
     FW["NO SHOTGUN INPUT\nSRA adapter exists but not triggered\nReason: 16S APIs available first"]:::warn
 
     subgraph T0["① T0 — 16S QUALITY & CLASSIFICATION   COMPLETE"]
@@ -117,11 +117,11 @@ flowchart TB
         U0B["METADATA FILTER\nsoil pH · land use · depth\nsequencing depth threshold"]:::unit
         U0C["DIVERSITY ESTIMATOR\nShannon H · Chao1\nquality_filter.py"]:::unit
         S0{{"SEPARATOR\nt0_pass?"}}:::sep
-        T0R["11,122 NEON pass\n95 MGnify pass\n440k synthetic pass\n→ 451,122 total t0_pass"]:::done
+        T0R["11,026 NEON pass\n95 MGnify pass\n220k synthetic pass\n→ 231,121 total t0_pass"]:::done
     end
 
     subgraph T025["② T0.25 — ML PREDICTOR   SURROGATE TRAINED — RF classifier ROC-AUC 0.812"]
-        T025S["functional_predictor.py · predict_with_gate()\npicrust2_runner.py · humann3_shortcut.py\nSurrogate RF TRAINED on 5,907 real communities (cf5e081)\nClassifier gate: ROC-AUC 0.812 ± 0.012 · OOB 0.772\nRegressor: R² 0.465 ± 0.025 · OOB 0.469\nTop features: soil_ph (42%) · Nitrososphaerota (19%) · Nitrospirota (12%)\nModels: models/bnf_surrogate_classifier.joblib + bnf_surrogate_regressor.joblib\nNot yet called in pipeline_core.py T0.25 batch"]:::skip
+        T025S["functional_predictor.py · predict_with_gate()\npicrust2_runner.py · humann3_shortcut.py\nSurrogate RF TRAINED on 5,907 real communities (cf5e081)\nClassifier gate: ROC-AUC 0.812 ± 0.012 · OOB 0.772\nRegressor: R² 0.465 ± 0.025 · OOB 0.469\nTop features: soil_ph (42%) · Nitrososphaerota (19%) · Nitrospirota (12%)\nModels: models/bnf_surrogate_classifier.joblib + bnf_surrogate_regressor.joblib\ncalled via run_t025_batch() (pipeline_core.py:1070)\nsurrogate not yet deployed to /data/pipeline/models/"]:::skip
     end
 
     subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   COMPLETE — 4,491 communities · 117 min"]
@@ -131,7 +131,7 @@ flowchart TB
         U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium · 28/357 exchanges open\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective · glpk solver (OSQP unsafe at frac=0.0)\ncommits metabolite-ns + c78a0bd"]:::unit
         U1E["FVA ANALYZER\nNITROGENASE_MO reactions\n90% growth constraint · processes=1\nfva_max x2 = NH4-equiv/gDW/h"]:::unit
         S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
-        T1R["4,491 real t1_pass total\n3,378 BNF-pass (max=50.0, avg=36.23 mmol NH4/gDW/h)\n1,113 non-BNF (biomass proxy)\nkeystone taxa stored per community in DB"]:::done
+        T1R["4,830+ real t1_pass (2026-03-11, in progress)\n3,378+ BNF-pass (max=50.0, avg=36.23 mmol NH4/gDW/h)\nnon-BNF remainder (biomass proxy)\nkeystone taxa stored per community in DB"]:::done
         T1B["BUG HISTORY — 4 ITERATIONS + SOLVER DOC\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n3 Complete AGORA2 medium — ATP-unbounded FVA 100-400\n  Fixed: minimal medium closes 329 exchanges (ad31e7b)\n4 Shared intracellular metabolite pools — max 108 mmol/gDW/h\n  Fixed: namespace met ids per organism (metabolite-ns)\n5 OSQP/hybrid FVA hangs on unconstrained problems\n  Fixed: force glpk · documented (c78a0bd)"]:::bug
     end
 
@@ -146,7 +146,7 @@ flowchart TB
     P2[/"FINDINGS.md committed 25de5c8\ncorrelation · taxa enrichment · spatial\n100 ranked candidates · 11 interventions"/]:::done
     P3["INTERVENTION REPORT generated (11 recs)\nFIELD PACKAGE: not yet built\nNext: mechanistic bioinoculant screen (T2 gap)"]:::warn
 
-    W0["NEON: 6,445 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
+    W0["NEON: 6,541 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
     W1["~6,341 communities\nno matching SBML genus"]:::waste
     W2["1,113 communities\nstability < 0.30"]:::waste
 
@@ -199,6 +199,7 @@ flowchart TB
     classDef prod fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
     classDef waste fill:#1a0a0a,stroke:#666,color:#999
     classDef add fill:#1a0d2e,stroke:#8e44ad,color:#d7bde2
+    classDef done fill:#0a2a12,stroke:#27ae60,color:#a9dfbf
     classDef val fill:#0d1f2e,stroke:#2980b9,color:#aed6f1
 
     F1[/"NCBI SRA\nshotgun reads\n~2M samples"/]:::feed
@@ -243,7 +244,7 @@ flowchart TB
     end
 
     subgraph POST["⑤ POST-PROCESSING — ADDITIONS F · G · H"]
-        PP1["SPATIAL INTERPOLATOR\nKriging on NEON GPS coordinates\nBNF potential field map\ncontinuous geographic surface\nADDITION F"]:::add
+        PP1["SPATIAL INTERPOLATOR — COMPLETE Mar-8\nKriging on NEON GPS coordinates\nBNF potential field map · 6,413-point CONUS grid\nresults: /data/pipeline/results/spatial/\nADDITION F"]:::done
         PP2["TIME-SERIES TRACKER\nmulti-visit NEON sites\ncommunity BNF trajectory\nstable vs transient high-BNF\nADDITION G"]:::add
         PP3["CROSS-PIPELINE OPTIMIZER\nBNF x C-sequestration x pathogen suppression\njoint community ranking\nsoil health index\nADDITION H"]:::add
     end
@@ -293,13 +294,13 @@ flowchart TB
 
 | Step | Reference | Current | Reason |
 |---|---|---|---|
-| **Input** | Shotgun metagenomes from SRA (millions) | 16S amplicon: NEON 17,567 + MGnify 95 + 440k synthetic | 16S APIs available first; SRA shotgun not yet triggered |
+| **Input** | Shotgun metagenomes from SRA (millions) | 16S amplicon: NEON 17,567 + MGnify 95 + 220k synthetic | 16S APIs available first; SRA shotgun not yet triggered |
 | **T0 method** | Multi-source QC + functional gene scan | vsearch 16S → SILVA 138 classification only | Sufficient for 16S; functional gene scan deferred to T1 genus lookup |
 | **T0.25 ML** | PICRUSt2 → RF/GBM BNF score → similarity search | Surrogate **trained**: RF classifier gate (ROC-AUC 0.812) + regressor (R² 0.465) on 5,907 real samples. `predict_with_gate()` wired. Not yet called by `pipeline_core.py` T0.25 batch | HUMAnN3 is shotgun-only; PICRUSt2 not wired into batch; surrogate awaits pipeline integration |
 | **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML, 20 genera on disk | CarveMe requires shotgun MAGs; genus-level proxy loses strain variation |
 | **T1 nitrogenase** | Present from annotation-driven model build | Patched into 9 genera via patch_diazotroph_models.py | AGORA2 template omits nitrogenase; not a catalogued AGORA2 reaction |
 | **T1 medium** | N-limited minimal medium from the start | 3 iterations to reach correct medium (commits 90f0e92 → 13ee41d → ad31e7b) | AGORA2 ships with complete medium; LP saturation and ATP-unbounded FVA not obvious until empirically observed |
-| **T1 results** | ~2,000 high-confidence metabolic hits | 4,491 real t1_pass (3,378 BNF + 1,113 non-BNF) — **COMPLETE** | max=50.0, avg=36.23 mmol NH₄/gDW/h; metabolite-ns namespace fix confirmed cap |
+| **T1 results** | ~2,000 high-confidence metabolic hits | 4,830+ real t1_pass (3,378+ BNF) — **COMPLETE** | max=50.0, avg=36.23 mmol NH₄/gDW/h; metabolite-ns namespace fix confirmed cap |
 | **T2 real** | Run after T1 completes | **COMPLETE** — 4,491 communities in 117.5 min, 0 errors | `scripts/t2_dfba_batch.py` built (f46a1a4); 3,378 t2_pass (stability ≥ 0.30) |
 | **T2 intervention** | Full bioinoculant + amendment screen | Metadata-driven picker deployed (bbf03a4); 13-field metadata now passed (1429734): temp, OM%, clay%, precipitation, land_use, management, sampling_fraction, site_id, climate_zone; flux-based t1_confidence | `intervention_screener.py` wired with full metadata; mechanistic niche scoring awaits AGORA2 genus models |
 | **Output** | Ranked communities + intervention report + field package | 100 ranked candidates · 11 interventions · FINDINGS.md committed (25de5c8) | Field validation package not yet built; mechanistic intervention screening is next gap |
