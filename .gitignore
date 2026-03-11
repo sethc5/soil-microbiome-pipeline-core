@@ -53,3 +53,6 @@ results/
 
 # Documents / binary assets (use docs/ for reference, never large binaries)
 *.pdf
+fastp.html
+fastp.json
+logs/
