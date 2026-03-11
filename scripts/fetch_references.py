@@ -1,5 +1,5 @@
 """
-Fetch relevant academic references from Semantic Scholar and save to references/.
+Fetch relevant academic references from Semantic Scholar and save to knowledge/.
 Rate-limited to 1 request/second per API key terms.
 """
 
@@ -16,7 +16,7 @@ if not API_KEY:
              "Export your Semantic Scholar API key before running.")
 BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 FIELDS = "title,abstract,authors,year,externalIds,citationCount,openAccessPdf,venue"
-OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "references")
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "knowledge")
 
 QUERIES = [
     # (output_filename_stem, topic_heading, query_string, n_results)

@@ -454,7 +454,7 @@ class TestReadmePhase8:
 
     @pytest.fixture(autouse=True)
     def _text(self):
-        self.readme = Path("soil-microbiome-README.md").read_text()
+        self.readme = Path("README.md").read_text()
 
     def test_no_patric_references(self):
         """PATRIC must be replaced by BV-BRC throughout README."""

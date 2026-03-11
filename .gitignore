@@ -21,8 +21,10 @@ profiles/
 humann3_out/
 picrust2_out/
 annotations/
+data/                   # runtime cache; nothing here should be committed
 models/*
 !models/README.md
+!models/agora2/MANIFEST.tsv
 
 # Reference data (curated, not checked in)
 reference/*.biom
@@ -48,3 +50,6 @@ results/
 # Secrets / credentials
 .env
 *.key
+
+# Documents / binary assets (use docs/ for reference, never large binaries)
+*.pdf

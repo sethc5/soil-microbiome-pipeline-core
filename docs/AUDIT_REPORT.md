@@ -350,7 +350,7 @@ All 8 adapters are registered in `adapters/__init__.py` via `ADAPTER_REGISTRY` a
 - Bioremediation requires alkB gene and sets `exclude_contaminated: false` (inverted gate)
 - All 3 configs have distinct `db_path` values (verified by test)
 
-### `soil-microbiome-README.md` (888 lines)
+### `README.md` (888 lines)
 - Comprehensive documentation covering architecture, schema, config, validation strategy, tool stack, application notes
 - Phase 8 updates applied: BV-BRC replaces PATRIC (no unreplaced PATRIC references), new schema columns documented (site_id, visit_number, sampling_fraction, fungal_bacterial_ratio, has_amoa_bacterial, t1_model_confidence, t2_confidence), checkm in tool stack
 - README schema DDL matches `db_utils.py` actual schema
