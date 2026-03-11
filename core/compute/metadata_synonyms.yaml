@@ -1,0 +1,179 @@
+# compute/metadata_synonyms.yaml
+# Synonym tables for MetadataNormalizer.
+# Edit this file to add new alias mappings without touching Python code.
+#
+# Keys must match the attribute names in MetadataNormalizer:
+#   ph_aliases, texture_aliases, om_aliases,
+#   land_use_map, texture_map, fraction_keywords
+
+# ---------------------------------------------------------------------------
+# pH field name synonyms (case-insensitive key matching)
+# ---------------------------------------------------------------------------
+ph_aliases:
+  - soil_ph
+  - ph
+  - ph_h2o
+  - ph_cacl2
+  - soil_water_ph
+  - ph_measured_cacl2_soil
+  - ph_measured_h2o_soil
+  - ph_h2o_1_2_5
+  - ph_kcl
+  - reaction_ph
+  - soilph
+  - h_ph                    # NEON variant
+
+# ---------------------------------------------------------------------------
+# Texture field name synonyms
+# ---------------------------------------------------------------------------
+texture_aliases:
+  - soil_texture
+  - texture
+  - soil_texture_class
+  - usda_texture_class
+  - textural_class
+  - soil_series_texture
+  - textureclss             # NEON variant
+
+# ---------------------------------------------------------------------------
+# Organic matter / total organic carbon field name synonyms
+# ---------------------------------------------------------------------------
+om_aliases:
+  - organic_matter_pct
+  - total_organic_carbon
+  - soil_organic_carbon
+  - organic_carbon
+  - toc
+  - soc
+  - org_c_pct
+  - organic_matter
+  - loi_pct                 # loss on ignition proxy
+  - corg                    # European variant
+  - oc_percent
+  - organicCPercent         # NEON variant
+
+# ---------------------------------------------------------------------------
+# Land use vocabulary → canonical term
+# Canonical terms: cropland, grassland, forest, shrubland, wetland, urban, disturbed
+# ---------------------------------------------------------------------------
+land_use_map:
+  cropland: cropland
+  agricultural: cropland
+  agriculture: cropland
+  arable: cropland
+  farm: cropland
+  cultivated: cropland
+  row crop: cropland
+  annually cropped: cropland
+  orchard: cropland
+  vineyard: cropland
+  prairie: grassland
+  pasture: grassland
+  meadow: grassland
+  grassland: grassland
+  rangeland: grassland
+  savanna: grassland
+  pampas: grassland
+  steppe: grassland
+  forest: forest
+  woodland: forest
+  boreal: forest
+  temperate forest: forest
+  tropical forest: forest
+  plantation: forest
+  mixed forest: forest
+  deciduous: forest
+  coniferous: forest
+  shrubland: shrubland
+  scrub: shrubland
+  chaparral: shrubland
+  heathland: shrubland
+  fynbos: shrubland
+  maquis: shrubland
+  wetland: wetland
+  marsh: wetland
+  bog: wetland
+  fen: wetland
+  peatland: wetland
+  mangrove: wetland
+  swamp: wetland
+  urban: urban
+  city: urban
+  suburban: urban
+  industrial: urban
+  mine: disturbed
+  remediation: disturbed
+  landfill: disturbed
+  contaminated: disturbed
+  post-mining: disturbed
+  reclaimed: disturbed
+
+# ---------------------------------------------------------------------------
+# Soil texture vocabulary → canonical USDA class
+# ---------------------------------------------------------------------------
+texture_map:
+  sand: sand
+  sandy: sand
+  loamy sand: loamy sand
+  loamy_sand: loamy sand
+  sandy loam: sandy loam
+  sandy_loam: sandy loam
+  loam: loam
+  silt loam: silt loam
+  silt_loam: silt loam
+  silt: silt
+  sandy clay loam: sandy clay loam
+  sandy_clay_loam: sandy clay loam
+  clay loam: clay loam
+  clay_loam: clay loam
+  silty clay loam: silty clay loam
+  silty_clay_loam: silty clay loam
+  silty clay: silty clay
+  silty_clay: silty clay
+  sandy clay: sandy clay
+  sandy_clay: sandy clay
+  clay: clay
+  # abbreviations
+  scl: sandy clay loam
+  cl: clay loam
+  sicl: silty clay loam
+  sic: silty clay
+  sc: sandy clay
+  sl: sandy loam
+  ls: loamy sand
+  l: loam
+
+# ---------------------------------------------------------------------------
+# Sampling fraction keyword detection
+# Keys: fraction name; values: list of substrings to detect in any order
+# ---------------------------------------------------------------------------
+fraction_keywords:
+  rhizosphere:
+    - rhizosphere
+    - rhizo
+    - root-associated
+    - root adhering
+    - root-zone
+    - rootzone
+    - rizosfera
+  endosphere:
+    - endosphere
+    - endophyte
+    - endorhiza
+    - inside root
+    - internal root
+    - root interior
+  bulk:
+    - bulk soil
+    - bulk_soil
+    - non-rhizosphere
+    - bare soil
+    - bulk
+    - unvegetated
+  litter:
+    - litter
+    - organic horizon
+    - o_horizon
+    - o-horizon
+    - forest floor
+    - duff

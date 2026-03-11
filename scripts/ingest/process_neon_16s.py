@@ -1,0 +1,609 @@
+"""
+scripts/process_neon_16s.py — Download and classify NEON 16S amplicons.
+
+For each NEON sample that has fastq_urls in communities.notes this script:
+  1. Downloads R1 + R2 FASTQ from NEON GCS (or NEON storage)
+  2. Trims with fastp (adapter removal, quality trim)
+  3. Merges paired-end reads with vsearch
+  4. Classifies against SILVA 16S ref (vsearch global_search)
+  5. Builds phylum_profile + top_genera dicts
+  6. Updates communities table: phylum_profile, top_genera, shannon_diversity
+  7. Sets runs.t0_pass = 1 for the sample
+
+Requires:
+  conda env: bioinfo  (vsearch, fastp, cutadapt)
+  SILVA ref: /data/pipeline/ref/SILVA_138.1_SSURef_Nr99_tax_silva.fasta.gz
+  Download ref first: bash scripts/download_silva.sh
+
+Usage:
+  python scripts/process_neon_16s.py \\
+      --db /data/pipeline/db/soil_microbiome.db \\
+      --staging /data/pipeline/staging/neon_16s \\
+      --silva /data/pipeline/ref/SILVA_138.1_SSURef.fasta \\
+      --sites HARV ORNL KONZ \\
+      --workers 4
+
+  # Dry run (print actions only):
+  python scripts/process_neon_16s.py --dry-run --sites HARV
+
+  # All sites (overnight run):
+  python scripts/process_neon_16s.py --all-sites --workers 8
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from math import log
+from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-7s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+BIOINFO_BIN = "/home/deploy/miniforge3/envs/bioinfo/bin"
+VSEARCH    = f"{BIOINFO_BIN}/vsearch"
+FASTP      = f"{BIOINFO_BIN}/fastp"
+CUTADAPT   = f"{BIOINFO_BIN}/cutadapt"
+
+# 16S primers (515F / 806R — Earth Microbiome Project standard)
+PRIMER_FWD = "GTGYCAGCMGCCGCGGTAA"
+PRIMER_REV = "GGACTACNVGGGTWTCTAAT"
+
+# vsearch taxonomy parsing
+VSEARCH_ID   = 0.97   # OTU identity threshold for SILVA search
+TOP_N_GENERA = 10
+TOP_N_PHYLA  = 25
+# TUNED (commit 4739ff0, hetzner2 36-core Xeon W-2295):
+#   Reduced from 50k → 10k to keep vsearch runtime <30s per sample.
+#   At 50k reads against the 27,277-seq SILVA reference with 16 workers,
+#   wall-clock per job exceeded the 300s timeout and triggered a storm of
+#   failures. 10k gives stable genus-level taxonomy at Shannon H ≈ ±0.02
+#   vs 50k on the same samples (tested on BLAN 2020 subset).
+SUBSAMPLE_N  = 10_000
+
+# ---------------------------------------------------------------------------
+# SILVA taxonomy utilities
+# ---------------------------------------------------------------------------
+
+def _parse_silva_taxonomy(taxstr: str) -> tuple[str, str]:
+    """
+    Parse taxonomy string from NCBI 16S db or SILVA format:
+      NCBI: 'Bacteria; Firmicutes; Bacilli; Lactobacillales; ...'
+      SILVA: 'Bacteria;Firmicutes;Bacilli;...'
+      NCBI defline: 'Bacillus subtilis strain NRRL NRS-744 16S rRNA [...]'
+    → (phylum, genus)
+    """
+    # Handle NCBI lineage format (semicolon+space separated)
+    taxstr = taxstr.strip()
+    if "; " in taxstr:
+        parts = [p.strip() for p in taxstr.split(";") if p.strip()]
+    elif ";" in taxstr:
+        parts = [p.strip() for p in taxstr.split(";") if p.strip()]
+    else:
+        # NCBI defline-style: 'Bacillus subtilis strain...' → genus is first word
+        words = taxstr.replace("[", "").replace("]", "").split()
+        phylum = "Unknown"
+        genus = words[0] if words else "Unknown"
+        return phylum, genus
+
+    # Skip 'cellular organisms' and 'root' prefixes common in NCBI lineage
+    parts = [p for p in parts if p.lower() not in ("cellular organisms", "root", "")]
+    domain = parts[0] if parts else "Unknown"
+    phylum = parts[1] if len(parts) > 1 else "Unknown"
+    genus  = parts[5] if len(parts) > 5 else (parts[-1] if parts else "Unknown")
+    # Filter out numeric clade codes like D_0__, D_1__ in older SILVA builds
+    if phylum.startswith("D_"):
+        phylum = parts[2] if len(parts) > 2 else "Unknown"
+    if genus.startswith("D_"):
+        genus = parts[-1] if parts else "Unknown"
+    return phylum, genus
+
+
+def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
+    """
+    Read vsearch UC-format output and build taxonomy profiles.
+    UC format columns: type, cluster, size, pct_id, strand, ., ., cigar, query, centroid
+    Type H=hit, N=no_match.
+    Centroid column (index 9) contains the full reference label including taxonomy.
+    """
+    phylum_counts: dict[str, int] = defaultdict(int)
+    genus_counts:  dict[str, int] = defaultdict(int)
+    total = 0
+
+    try:
+        with hits_file.open() as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+
+                if parts[0] == "N":  # no hit
+                    total += 1
+                    phylum_counts["Unclassified"] += 1
+                    continue
+                if parts[0] != "H":  # skip non-hit rows (S=seed, C=cluster)
+                    continue
+
+                # Column 9 (index 9) = full centroid label: "accession taxonomy"
+                target_label = parts[9] if len(parts) > 9 else ""
+                # Strip the accession (first word) to get tax string
+                label_parts = target_label.split(None, 1)
+                taxstr = label_parts[1] if len(label_parts) > 1 else label_parts[0] if label_parts else "Unknown"
+
+                phylum, genus = _parse_silva_taxonomy(taxstr)
+                phylum_counts[phylum] += 1
+                genus_counts[genus]   += 1
+                total += 1
+    except Exception as e:
+        logger.warning("Could not parse UC hits file %s: %s", hits_file, e)
+
+    if total == 0:
+        return {}, {}, 0.0
+
+    phylum_freq = {k: round(v / total, 6)
+                   for k, v in sorted(phylum_counts.items(),
+                                       key=lambda x: -x[1])[:TOP_N_PHYLA]}
+    genus_freq  = {k: round(v / total, 6)
+                   for k, v in sorted(genus_counts.items(),
+                                       key=lambda x: -x[1])[:TOP_N_GENERA]}
+
+    # Shannon diversity over phyla
+    shannon = 0.0
+    for p in phylum_freq.values():
+        if p > 0:
+            shannon -= p * log(p)
+
+    return phylum_freq, genus_freq, round(shannon, 4)
+
+
+# ---------------------------------------------------------------------------
+# Per-sample worker
+# ---------------------------------------------------------------------------
+
+def _download_file(url: str, dest: Path) -> bool:
+    """Download a file via curl (handles GCS redirect)."""
+    if dest.exists() and dest.stat().st_size > 10_000_000:  # >10 MB = likely complete FASTQ
+        logger.debug("Cache hit: %s (%dMB)", dest.name, dest.stat().st_size // 1_000_000)
+        return True
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            ["curl", "-fsSL", "--retry", "3", "--retry-delay", "5",
+             "-o", str(dest), url],
+            timeout=900, capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.warning("curl failed for %s: %s", url, result.stderr.decode()[:200])
+            return False
+        return dest.exists() and dest.stat().st_size > 1_000
+    except subprocess.TimeoutExpired:
+        logger.warning("Download timeout: %s", url)
+        return False
+
+
+def _run_fastp(r1: Path, r2: Path, out1: Path, out2: Path, workdir: Path) -> bool:
+    """Trim adapters and quality filter with fastp."""
+    log_path = workdir / "fastp.json"
+    cmd = [
+        FASTP, "-i", str(r1), "-I", str(r2),
+        "-o", str(out1), "-O", str(out2),
+        "--json", str(log_path),
+        "--disable_length_filtering",
+        "--thread", "2",
+        # --quiet removed: not supported in fastp >= 1.0
+    ]
+    try:
+        result = subprocess.run(cmd, timeout=300, capture_output=True)
+        if result.returncode != 0:
+            logger.warning("fastp error: %s", result.stderr.decode()[:200])
+        return result.returncode == 0
+    except Exception as e:
+        logger.warning("fastp failed: %s", e)
+        return False
+
+
+def _subsample_fastq_to_fasta(fastq_gz: Path, fasta_out: Path,
+                               n: int = SUBSAMPLE_N) -> int:
+    """
+    Stream up to n reads from a (possibly BGZF-format) gzipped FASTQ file
+    and write as FASTA. Returns number of records written.
+
+    Uses Python's gzip module which natively handles concatenated gzip blocks
+    (BGZF format used by NEON GCS), avoiding vsearch's BGZF EOF false-error.
+    """
+    import gzip as _gzip
+    count = 0
+    try:
+        with _gzip.open(fastq_gz, "rt", errors="replace") as fh, \
+             fasta_out.open("w") as out:
+            while count < n:
+                header = fh.readline()
+                if not header:
+                    break
+                seq    = fh.readline().rstrip()
+                fh.readline()   # "+" separator
+                fh.readline()   # quality scores
+                header = header.rstrip()
+                if not header.startswith("@"):
+                    continue   # skip malformed lines
+                out.write(f">{header[1:]}\n{seq}\n")
+                count += 1
+    except Exception as exc:
+        logger.warning("FASTQ→FASTA streaming failed: %s", exc)
+        return 0
+    return count
+
+
+def _subsample_and_classify(
+    r1_raw: Path,
+    silva_db: str,
+    workdir: Path,
+    sample_id: str,
+) -> Path | None:
+    """
+    Subsample R1 reads to SUBSAMPLE_N, then classify against 16S reference.
+    Works for both amplicon and shotgun metagenomics data.
+    Returns path to hits UC file or None.
+    """
+    subsampled = workdir / "subsample.fasta"
+    hits       = workdir / "hits.uc"
+
+    # Step 1: stream FASTQ → FASTA using Python gzip (handles BGZF natively).
+    # Never over-requests reads, so avoids vsearch's sample_size > file_size error.
+    n_reads = _subsample_fastq_to_fasta(r1_raw, subsampled, SUBSAMPLE_N)
+    if n_reads == 0 or not subsampled.exists() or subsampled.stat().st_size == 0:
+        logger.warning("%s: FASTQ streaming produced empty output", sample_id)
+        return None
+    logger.debug("%s: converted %d reads to FASTA (%d bytes)", sample_id,
+                 n_reads, subsampled.stat().st_size)
+
+    # Step 2: classify subsampled reads against 16S reference
+    # --notrunclabels: use full FASTA header (includes taxonomy lineage)
+    # --uc: UC-format output includes full centroid label in column 9
+    cmd_class = [
+        VSEARCH, "--usearch_global", str(subsampled),
+        "--db", silva_db,
+        "--id", str(VSEARCH_ID),
+        "--uc", str(hits),
+        "--notrunclabels",
+        # TUNED (commit 351cc72): was --threads 4; N_workers × 4 = 96 threads
+        # on a 36-core machine caused severe CPU contention and a 100% timeout
+        # storm. Single-threaded vsearch with N parallel workers is faster overall.
+        "--threads", "1",
+        "--maxaccepts", "1",
+        # TUNED (commit 4739ff0): was 32; halved to 8 to reduce per-query search
+        # time against the 27,277-seq reference. Recall impact is negligible at
+        # 97% identity vs full-length 16S reads.
+        "--maxrejects", "8",
+    ]
+    try:
+        result = subprocess.run(cmd_class, timeout=300, capture_output=True)
+        # Clean up large subsampled file
+        if subsampled.exists():
+            subsampled.unlink()
+        if result.returncode == 0 and hits.exists():
+            return hits
+        logger.warning("%s classification stderr: %s",
+                       sample_id, result.stderr.decode()[:300])
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning("%s: vsearch classification timed out", sample_id)
+        return None
+
+
+# URL prefixes for amplicon libraries (Battelle Memorial Institute contract)
+# vs shotgun metagenome libraries (JGI) — we skip JGI files: they are
+# large (~5–20 GB) whole-genome shotgun FASTQs, unsuitable for 16S taxonomy.
+# Note: JGI marker appears in the DIRECTORY path (JGI_BONA_MMS/), not the
+# filename itself, so we must check the full URL path.
+_AMPLICON_PREFIXES = ("BMI_", "16S", "ITS",)
+
+
+def _prefer_amplicon_r1(fastq_urls: list[str]) -> list[str]:
+    """
+    Select R1 URLs, strongly preferring amplicon (BMI_) over shotgun (JGI_).
+    JGI metagenome files are 5–20 GB and download-timeout; they also contain
+    whole-genome shotgun reads that vsearch 16S classification handles poorly.
+
+    URL pattern: .../neon-microbial-raw-seq-files/{year}/{DIR}/{file}
+    - Shotgun: DIR starts with 'JGI_' (e.g. JGI_BONA_MMS)
+    - Amplicon: DIR starts with 'BMI_' or pool ID, filename has BMI_ prefix
+    """
+    def _is_r1(u: str) -> bool:
+        return "_R1_" in u or "_R1." in u or ".1.fastq" in u
+
+    def _is_r2(u: str) -> bool:
+        return "_R2_" in u or "_R2." in u or ".2.fastq" in u
+
+    def _is_shotgun(u: str) -> bool:
+        # JGI marker is in the directory component, not always the filename
+        # e.g. .../2025/JGI_BONA_MMS/52832.3.CTATCGCA.fastq.gz
+        path_parts = u.split("/")
+        return any(p.startswith("JGI_") for p in path_parts)
+
+    def _is_amplicon(u: str) -> bool:
+        fname = u.rsplit("/", 1)[-1]
+        return any(fname.startswith(p) for p in _AMPLICON_PREFIXES)
+
+    # Exclude JGI shotgun entirely — check the full URL path
+    amplicon_urls = [u for u in fastq_urls if not _is_shotgun(u)]
+    if not amplicon_urls:
+        logger.warning("Only JGI shotgun URLs available — skipping (too large for 16S)")
+        return []
+
+    # Tier 1: BMI amplicon R1
+    t1 = [u for u in amplicon_urls if _is_r1(u) and _is_amplicon(u)]
+    if t1:
+        return t1
+    # Tier 2: BMI amplicon R2 (use if no R1; vsearch classifies both strands)
+    t2 = [u for u in amplicon_urls if _is_r2(u) and _is_amplicon(u)]
+    if t2:
+        logger.debug("Using R2 (no R1 found): %s", t2[0][-60:])
+        return t2
+    # Tier 3: any non-JGI R1
+    t3 = [u for u in amplicon_urls if _is_r1(u)]
+    if t3:
+        return t3
+    # Tier 4: any non-JGI, non-R2
+    t4 = [u for u in amplicon_urls if not _is_r2(u)]
+    if t4:
+        return t4
+    return amplicon_urls
+
+
+def _process_one_sample(
+    sample_id: str,
+    community_id: int,
+    fastq_urls: list[str],
+    silva_db: str,
+    staging_dir: Path,
+    dry_run: bool,
+    target_id: str,
+) -> dict | None:
+    """Full pipeline for one NEON sample. Returns result dict or None on failure."""
+    r1_urls = _prefer_amplicon_r1(fastq_urls)
+    if not r1_urls:
+        logger.warning("%s: no suitable R1 URL found in %s", sample_id, fastq_urls)
+        return None
+
+    r1_url = r1_urls[0]
+    # R2 not needed: we subsample R1 directly for taxonomy
+
+    workdir = staging_dir / sample_id.replace("/", "_")
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    r1_raw = workdir / "R1.fastq.gz"
+
+    if dry_run:
+        logger.info("[DRY RUN] %s: would download %s + classify", sample_id, r1_url[:60])
+        return {"sample_id": sample_id, "skipped": True}
+
+    # --- Download R1 only ---
+    logger.info("%s: downloading R1...", sample_id)
+    if not _download_file(r1_url, r1_raw):
+        logger.error("%s: R1 download failed", sample_id)
+        return None
+
+    # --- Subsample + Classify (no fastp or R2 merge needed) ---
+    hits_file = _subsample_and_classify(r1_raw, silva_db, workdir, sample_id)
+
+    # Delete R1 immediately to free disk
+    try:
+        r1_raw.unlink()
+    except Exception:
+        pass
+
+    if not hits_file:
+        logger.warning("%s: classification failed", sample_id)
+        try:
+            shutil.rmtree(workdir)
+        except Exception:
+            pass
+        return None
+
+    # --- Parse profiles ---
+    phylum_profile, top_genera, shannon = _build_profiles(hits_file)
+
+    # Clean up workdir (hits file included)
+    try:
+        shutil.rmtree(workdir)
+    except Exception:
+        pass
+
+    if not phylum_profile:
+        logger.warning("%s: empty taxonomy result", sample_id)
+        return None
+
+    return {
+        "sample_id":      sample_id,
+        "community_id":   community_id,
+        "phylum_profile": phylum_profile,
+        "top_genera":     top_genera,
+        "shannon":        shannon,
+    }
+
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+def _db_connect(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(path, timeout=60)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def _update_community(conn: sqlite3.Connection, result: dict) -> None:
+    conn.execute(
+        """
+        UPDATE communities SET
+            phylum_profile    = ?,
+            top_genera        = ?,
+            shannon_diversity = ?
+        WHERE community_id = ?
+        """,
+        (
+            json.dumps(result["phylum_profile"]),
+            json.dumps(result["top_genera"]),
+            result["shannon"],
+            result["community_id"],
+        ),
+    )
+    conn.execute(
+        "UPDATE runs SET t0_pass=1 WHERE sample_id=? AND t0_pass=0",
+        (result["sample_id"],),
+    )
+    conn.commit()
+
+
+def _fetch_pending_samples(
+    conn: sqlite3.Connection, sites: list[str] | None
+) -> list[tuple]:
+    """Return (sample_id, community_id, notes) for pending NEON samples."""
+    site_filter = ""
+    params: list = ["neon"]
+    if sites:
+        placeholders = ",".join("?" * len(sites))
+        site_filter = f" AND s.site_id IN ({placeholders})"
+        params.extend(sites)
+
+    return conn.execute(
+        f"""
+        SELECT s.sample_id, c.community_id, c.notes
+        FROM communities c
+        JOIN samples s ON c.sample_id = s.sample_id
+        JOIN runs r ON r.sample_id = s.sample_id
+        WHERE s.source = ?
+          AND (r.t0_pass = 0 OR r.t0_pass IS NULL)
+          AND c.notes IS NOT NULL
+          AND c.notes != '[]'
+          {site_filter}
+        ORDER BY s.site_id, s.sample_id
+        """,
+        params,
+    ).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--db",      default="/data/pipeline/db/soil_microbiome.db")
+    p.add_argument("--staging", default="/data/pipeline/staging/neon_16s")
+    p.add_argument("--silva",   default="/data/pipeline/ref/16S_ref.fasta",
+                   help="16S FASTA reference for vsearch. Build with: bash scripts/download_silva.sh")
+    p.add_argument("--sites",   nargs="*",
+                   default=["HARV","ORNL","KONZ","WOOD","CPER","UNDE","STEI",
+                             "DCFS","NOGP","CLBJ","OAES"],
+                   help="NEON site codes to process (default: 11 key sites).")
+    p.add_argument("--all-sites", action="store_true",
+                   help="Process all NEON sites in the DB.")
+    p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--target-id", default="carbon_sequestration")
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    # Tool checks
+    for tool in [VSEARCH, FASTP]:
+        if not Path(tool).exists():
+            logger.error("Required tool not found: %s", tool)
+            logger.error("Run: conda install -n bioinfo -c bioconda vsearch fastp")
+            sys.exit(1)
+
+    silva_db = args.silva
+    if not Path(silva_db).exists():
+        logger.error("SILVA reference not found: %s", silva_db)
+        logger.error("Run: bash scripts/download_silva.sh")
+        sys.exit(1)
+
+    staging = Path(args.staging)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    conn = _db_connect(args.db)
+    sites = None if args.all_sites else args.sites
+    pending = _fetch_pending_samples(conn, sites)
+
+    if not pending:
+        logger.info("No pending NEON samples with FASTQ URLs.")
+        return
+
+    logger.info("Processing %d NEON samples (workers=%d)", len(pending), args.workers)
+
+    n_ok = n_fail = n_skip = 0
+
+    def _worker(row):
+        sample_id, community_id, notes_raw = row
+        try:
+            notes = json.loads(notes_raw) if notes_raw else {}
+        except Exception:
+            return None
+        # notes can be list (old) or dict {"fastq_urls": [...]}
+        if isinstance(notes, list):
+            urls = notes
+        else:
+            urls = notes.get("fastq_urls", [])
+        if not urls:
+            return None
+        return _process_one_sample(
+            sample_id, community_id, urls,
+            silva_db, staging, args.dry_run, args.target_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(_worker, row): row[0] for row in pending}
+        for fut in as_completed(futures):
+            sid = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as exc:
+                logger.error("%s: unexpected error: %s", sid, exc)
+                n_fail += 1
+                continue
+
+            if result is None:
+                n_fail += 1
+                continue
+            if result.get("skipped"):
+                n_skip += 1
+                continue
+
+            if not args.dry_run:
+                try:
+                    _update_community(conn, result)
+                    n_ok += 1
+                    logger.info("✓ %s  phyla=%d  shannon=%.2f",
+                               sid, len(result["phylum_profile"]), result["shannon"])
+                except Exception as exc:
+                    logger.error("%s: DB update failed: %s", sid, exc)
+                    n_fail += 1
+
+    print("\n=== NEON 16S processing complete ===")
+    print(f"  Processed OK  : {n_ok}")
+    print(f"  Failed        : {n_fail}")
+    print(f"  Dry-run skip  : {n_skip}")
+
+
+if __name__ == "__main__":
+    main()

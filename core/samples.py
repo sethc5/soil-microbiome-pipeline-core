@@ -3,8 +3,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from compute.metadata_normalizer import MetadataNormalizer
-from db_utils import SoilDB
+from .compute.metadata_normalizer import MetadataNormalizer
+from .db_utils import SoilDB
 
 logger = logging.getLogger(__name__)
 

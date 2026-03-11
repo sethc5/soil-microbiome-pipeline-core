@@ -1,14 +1,13 @@
 from __future__ import annotations
 import logging
 import time
-import json
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from core.base import AbstractIntent
-from receipt_system import Receipt
+from .base import AbstractIntent
+from .receipt_system import Receipt
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ class PipelineEngine:
         """
         Consolidated worker logic with namespacing and GLPK enforcement.
         """
-        from compute.community_fba import run_community_fba
+        from .compute.community_fba import run_community_fba
         
         results = []
         for cid in community_ids:

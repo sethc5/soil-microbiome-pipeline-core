@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 import typer
 import yaml
 
-from db_utils import SoilDB
+from core.db_utils import SoilDB
 from core.samples import SampleManager
 from core.engine import PipelineEngine
 from apps.bnf.intent import BNFIntent
