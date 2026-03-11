@@ -6,7 +6,7 @@ A single gram of healthy soil contains ~10,000 bacterial species, ~200 meters of
 
 This pipeline provides systematic infrastructure to scan that space. The "candidates" here are not molecules or crystal structures — they are **microbial community compositions, functional guilds, and intervention strategies** (bioinoculants, amendments, land management practices) predicted to shift soil microbiome function toward a defined target state. The same 4-tier funnel logic from [biochem-pipeline-core](https://github.com/sethc5/biochem-pipeline-core), [materials-pipeline-core](https://github.com/sethc5/materials-pipeline-core), and [genomics-pipeline-core](https://github.com/sethc5/genomics-pipeline-core) applies — cheap filters first, expensive simulation last, everything logged to a database that accumulates scientific value over time.
 
-> **Status (2026-03-11):** T0 → T0.25 → T1 → T2 running end-to-end on NEON 16S + MGnify data · **4,830 T1-pass, 3,378 T2-pass communities** · BNF surrogate RF trained (ROC-AUC 0.812) · 11 field-ready intervention recommendations · AGORA2 genus-proxy approach (MAG/CarveMe gap open) · [Contributors welcome](CONTRIBUTING.md)
+> **Status (2026-03-11):** **Modular Rebuild Complete** · T0 → T1 → T2 decoupled into plugin-based architecture · v3 Dynamic Schema deployed · Unified authoritative runner established · **4,830 T1-pass, 3,378 T2-pass communities** (v2 baseline) · [Contributors welcome](CONTRIBUTING.md)
 
 **Key documents:**
 - [docs/pipeline_process_diagrams.md](docs/pipeline_process_diagrams.md) — reference model, current implementation, and planned additions as process flow diagrams
@@ -86,9 +86,13 @@ These differences justify a separate codebase. The architectural pattern (4-tier
 
 ---
 
-## Reference Architecture (Design Target)
+## Modular Architecture (v3 Rebuild)
 
-> This section describes the intended end-state architecture. For what is actually running today, see [Current State](#current-state-2026-03-11) above and [Diagram 2 in pipeline_process_diagrams.md](docs/pipeline_process_diagrams.md).
+The pipeline has been refactored into a **Modular Funnel Engine** that decouples biological logic from the execution framework.
+
+- **/core**: Unified engine, parallelization, and sample normalization.
+- **/apps**: Application-specific "Intents" (e.g., `BNFIntent`) defining media, stoichiometry, and targets.
+- **/db_utils.py**: Normalized v3 schema with dynamic annotations.
 
 ### The 4-Tier Screening Funnel
 

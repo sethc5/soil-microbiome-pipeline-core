@@ -1,7 +1,23 @@
 # Pipeline Status Log
 
-**Last updated**: 2026-03-10 (session 4 — FINDINGS.md refresh + deployment doc)  
-**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `2b5d343`  
+**Last updated**: 2026-03-11 (session 5 — Hard Reset & Modular Rebuild)  
+**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main`
+>>>>>>> SEARCH
+## 8-Item Audit — Status
+
+| # | Item | Status | Commit |
+|---|------|--------|--------|
+## Rebuild Status (Modular Funnel)
+
+| Component | Status | Description |
+|---|---|---|
+| Core Engine | ✅ Done | Unified parallel runner with Intent support |
+| BNF Application | ✅ Done | Ported stoichiometry and constraints to apps/bnf |
+| Dynamic Schema | ✅ Done | v3 Schema with trait annotations table |
+| Unified Ingest | ✅ Done | SampleManager with enforced normalization |
+| Documentation | ✅ Done | Diagrams and schema docs updated to v3 |
+
+## 8-Item Audit — Status (v2 Legacy)
 **Compute**: `deploy@144.76.222.125` (`hetzner2`) — Xeon W-2295 / 36 threads / 252 GB RAM  
 **Pipeline dir**: `/opt/pipeline/` (git clone + venv) · **DB**: `/data/pipeline/db/soil_microbiome.db`  
 **Dev machine**: `dell5` (local) — code, git, VS Code  

@@ -176,7 +176,39 @@ flowchart TB
 
 ---
 
-## 3 — High-Value Additions to Reference Model
+## 3 — Modular Pipeline Architecture (Rebuild)
+
+Refactored architecture where the **Core Engine** is decoupled from the **Biological Intent**. Applications (BNF, Carbon, etc.) are implemented as plugins.
+
+```mermaid
+flowchart TB
+    classDef core fill:#0a2a0a,stroke:#2ecc71,color:#c8f0c8
+    classDef app  fill:#2d1b4e,stroke:#9b59b6,color:#dab8f5
+    classDef db   fill:#2a1a00,stroke:#f39c12,color:#fdeaa7
+
+    YAML[/"config.yaml\n(defines application)"/]:::app
+    INTENT["AbstractIntent\n(Stoichiometry, Media, Targets)"]:::app
+    
+    subgraph CoreEngine["UNIFIED PIPELINE ENGINE"]
+        T0["Tier 0\nNormalization"]:::core
+        T1["Tier 1\nFBA Funnel"]:::core
+        T2["Tier 2\ndFBA Funnel"]:::core
+    end
+
+    SoilDB[("SoilDB v3\nDynamic Annotations")]:::db
+
+    YAML --> INTENT
+    INTENT --> CoreEngine
+    CoreEngine <--> SoilDB
+    
+    BNF["apps/bnf/intent.py"]:::app
+    CARB["apps/carbon/intent.py"]:::app
+    
+    BNF -.-> INTENT
+    CARB -.-> INTENT
+```
+
+## 4 — High-Value Additions to Reference Model
 
 Reference model (Diagram 1) plus eight additions (lettered A–H, purple) that would materially increase scientific value. Two feedback loops (blue) close the gap between computational predictions and real-world measurement.
 
