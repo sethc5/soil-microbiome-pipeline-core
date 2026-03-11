@@ -93,7 +93,7 @@ flowchart TB
 
 ## 2 — Current Implementation
 
-What is actually running as of 2026-03-10 (latest commit `f51cfef`). Orange = skipped or constrained. Red = bugs encountered (all fixed). Green = complete. Numbers from live DB query.
+What is actually running as of 2026-03-10 (latest commit `f8f0995`). Orange = skipped or constrained. Red = bugs (all fixed). Green = complete. Numbers from live DB query (`soil_microbiome.db`, 457,662 total runs).
 
 ```mermaid
 flowchart TB
@@ -117,38 +117,38 @@ flowchart TB
         U0B["METADATA FILTER\nsoil pH · land use · depth\nsequencing depth threshold"]:::unit
         U0C["DIVERSITY ESTIMATOR\nShannon H · Chao1\nquality_filter.py"]:::unit
         S0{{"SEPARATOR\nt0_pass?"}}:::sep
-        T0R["11,027 NEON pass\n95 MGnify pass\n440k synthetic pass"]:::done
+        T0R["11,122 NEON pass\n95 MGnify pass\n440k synthetic pass\n→ 451,122 total t0_pass"]:::done
     end
 
-    subgraph T025["② T0.25 — ML PREDICTOR   SKIPPED"]
-        T025S["functional_predictor.py\npicrust2_runner.py · humann3_shortcut.py\nAll scripts exist — NOT RUN\nHUMAnN3 = shotgun only; N/A here\nPICRUSt2 works on 16S but not wired\nNo BNF ML model trained\nDecision: skip, accept higher T1 load"]:::skip
+    subgraph T025["② T0.25 — ML PREDICTOR   SKIPPED — SURROGATE NOW TRAINABLE"]
+        T025S["functional_predictor.py\npicrust2_runner.py · humann3_shortcut.py\nAll scripts exist — NOT RUN\nHUMAnN3 = shotgun only; N/A here\nPICRUSt2 works on 16S but not wired\nNo BNF ML model trained — YET\n⚡ 3,378 real FBA results now available\nSurrogate RF predictor ready to train (Addition C)"]:::skip
     end
 
-    subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   COMPLETE — 4,897 written in 20 min"]
+    subgraph T1["③ T1 — METABOLIC NETWORK REACTOR   COMPLETE — 4,491 communities · 117 min"]
         U1A["GENUS CLASSIFIER\n16S taxonomy → genus names\nvsearch top-hit\nReplaces: MAG binning"]:::unit
         U1B["MODEL LOOKUP\nPre-built AGORA2 SBML per genus\n20 genera on disk\nReplaces: CarveMe per-sample\nDivergence: genus-level proxy only"]:::unit
         U1C["NITROGENASE PATCHER\npatch_diazotroph_models.py\n9 diazotroph genera patched\nNITROGENASE_MO stoichiometry added\ncommit 90f0e92"]:::unit
-        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium · 28/357 exchanges open\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective · HiGHS/hybrid solver\ncommit metabolite-ns"]:::unit
-        U1E["FVA ANALYZER\nNITROGENASE_MO reactions\n90% growth constraint · processes=1\nfva_max x2 = NH4-equiv/gDW/h\ncommit 13ee41d"]:::unit
+        U1D["COMMUNITY FBA REACTOR\nN-limited minimal medium · 28/357 exchanges open\nisolated intracellular pools per organism\nshared extracellular pool\nbiomass objective · glpk solver (OSQP unsafe at frac=0.0)\ncommits metabolite-ns + c78a0bd"]:::unit
+        U1E["FVA ANALYZER\nNITROGENASE_MO reactions\n90% growth constraint · processes=1\nfva_max x2 = NH4-equiv/gDW/h"]:::unit
         S1{{"SEPARATOR\nflux >= 0.01\nmmol NH4/gDW/h?"}}:::sep
-        T1R["4,686 real t1_pass (pre-fix values — T1 RERUN PENDING)\nNEON 4,610 + MGnify 76\n1,113 non-BNF: avg 149 gDW/gDW/h\n3,845 BNF: avg 44.5 mmol NH4-equiv/gDW/h (inflated)\nmax 108 → expect ≤45 after metabolite-ns rerun"]:::done
-        T1B["BUG HISTORY — 4 ITERATIONS REQUIRED\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n3 Complete AGORA2 medium — ATP-unbounded FVA 100-400\n  Fixed: minimal medium closes 329 exchanges (ad31e7b)\n4 Shared intracellular metabolite pools\n  LP stacked N×ATP into shared atp_c pool\n  BNF inflated to max 108 (should be ≤45 mmol/gDW/h)\n  Fixed: namespace met ids per organism (metabolite-ns)"]:::bug
+        T1R["4,491 real t1_pass total\n3,378 BNF-pass (max=50.0, avg=36.23 mmol NH4/gDW/h)\n1,113 non-BNF (biomass proxy)\nkeystone taxa stored per community in DB"]:::done
+        T1B["BUG HISTORY — 4 ITERATIONS + SOLVER DOC\n1 Biomass proxy — no nitrogenase in AGORA2 models\n2 EX_nh4_e objective — LP saturation at 1000\n3 Complete AGORA2 medium — ATP-unbounded FVA 100-400\n  Fixed: minimal medium closes 329 exchanges (ad31e7b)\n4 Shared intracellular metabolite pools — max 108 mmol/gDW/h\n  Fixed: namespace met ids per organism (metabolite-ns)\n5 OSQP/hybrid FVA hangs on unconstrained problems\n  Fixed: force glpk · documented (c78a0bd)"]:::bug
     end
 
-    subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   PARTIAL"]
-        U2A["dFBA TIME COURSE\ndfba_runner.py · climate perturbation\n20k synthetic communities complete\nReal community run: PENDING after T1"]:::skip
-        U2B["STABILITY SCORER\nstability_analyzer.py\nPending real community data"]:::skip
-        T2W["INTERVENTION SCREENING\nbioinoculant_screen · amendment_effect_model\nestablishment_predictor\nAll scripts exist — NONE WIRED\nBlocked: needs stable real T1 first"]:::warn
-        S2{{"SEPARATOR\nstability >= 0.6?"}}:::sep
+    subgraph T2["④ T2 — COMMUNITY DYNAMICS REACTOR   COMPLETE — 117.5 min · 0 errors"]
+        U2A["dFBA TIME COURSE\nt2_dfba_batch.py · 4,491 communities\nglpk enforced · climate perturbation panel\n23,378 trajectory records in DB"]:::unit
+        U2B["STABILITY SCORER\nstability_analyzer.py\n3,378 t2_pass (stability ≥ 0.30)\nmean stability=0.87 · mean estab_prob=0.93"]:::unit
+        T2W["INTERVENTION ASSIGNMENT\nmetadata-driven picker (bbf03a4)\npH-amendment 58% · direct-inoculant 29%\ndiversity-enhancement 8% · drought-tolerant 5%\nNOTE: mechanistic intervention screener not yet wired"]:::warn
+        S2{{"SEPARATOR\nstability >= 0.30?"}}:::sep
     end
 
-    P1[/"4,686 REAL t1_pass\n3,845 BNF + 1,113 biomass-proxy\nkeystone taxa stored in DB\n20k synthetic T2 complete"/]:::prod
-    P2[/"FINDINGS.md\nserver-local only\nnot yet committed to repo"/]:::warn
-    P3["NO INTERVENTION REPORT\nNO FIELD PACKAGE\nBlocked on T2 intervention data"]:::skip
+    P1[/"3,378 BNF t2_pass communities\nmax flux=50.0 avg=36.23 mmol NH4/gDW/h\nkeystone taxa + dFBA trajectories in DB\n6,413-point CONUS kriging grid"/]:::prod
+    P2[/"FINDINGS.md committed f8f0995\ncorrelation · taxa enrichment · spatial\n100 ranked candidates · 11 interventions"/]:::done
+    P3["INTERVENTION REPORT generated (11 recs)\nFIELD PACKAGE: not yet built\nNext: mechanistic bioinoculant screen (T2 gap)"]:::warn
 
-    W0["NEON: 6,440 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
-    W1["~6,341 real communities\nno matching SBML genus"]:::waste
-    W2["pending"]:::waste
+    W0["NEON: 6,445 fail\nMGnify: 0 fail\nSynthetic: 0 fail"]:::waste
+    W1["~6,341 communities\nno matching SBML genus"]:::waste
+    W2["1,113 communities\nstability < 0.30"]:::waste
 
     F1 & F2 & F3 --> U0A
     FW -.->|"missing"| F1
@@ -160,13 +160,13 @@ flowchart TB
     T025S -->|"skipped — all pass to T1"| U1A
 
     U1A --> U1B --> U1C --> U1D --> U1E --> S1
-    T1B -.->|"fixed by ad31e7b"| U1D
+    T1B -.->|"all 5 bugs fixed"| U1D
     S1 -->|"pass"| U2A
     S1 -->|"fail"| W1
     S1 -.-> T1R
 
     U2A --> U2B --> S2
-    T2W -.->|"missing unit"| U2B
+    T2W -.->|"wired: metadata-driven\nnot yet: mechanistic screen"| U2B
     S2 -->|"pass"| P1
     S2 -->|"fail"| W2
 
@@ -299,8 +299,9 @@ flowchart TB
 | **T1 genome models** | CarveMe from per-sample MAG bins | Pre-built AGORA2 SBML, 20 genera on disk | CarveMe requires shotgun MAGs; genus-level proxy loses strain variation |
 | **T1 nitrogenase** | Present from annotation-driven model build | Patched into 9 genera via patch_diazotroph_models.py | AGORA2 template omits nitrogenase; not a catalogued AGORA2 reaction |
 | **T1 medium** | N-limited minimal medium from the start | 3 iterations to reach correct medium (commits 90f0e92 → 13ee41d → ad31e7b) | AGORA2 ships with complete medium; LP saturation and ATP-unbounded FVA not obvious until empirically observed |
-| **T1 results** | ~2,000 high-confidence metabolic hits | 4,686 real t1_pass (3,845 BNF + 1,113 non-BNF) — **T1 RERUN PENDING** after metabolite-ns fix | Inflated avg 44.5 / max 108 mmol/gDW/h due to shared intracellular pools; fix committed ea2257f; rerun in progress (PID 573613) — expect max ≤45 on completion |
-| **T2 real** | Run after T1 completes | Synthetic only (20k); real blocked until T1 BNF values stabilised | Needed stable T1 baseline before running expensive dFBA |
-| **T2 intervention** | Full bioinoculant + amendment screen | Not implemented | Scripts exist but not wired into BNF config; downstream of T2 real |
-| **Output** | Ranked communities + intervention report + field package | 4,686 t1_pass in DB; FINDINGS.md server-local; no report or field package | Blocked: report requires T2 intervention data |
-| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | avg 44.5 on target; max 108 in multi-diazotroph communities — **fix committed** (metabolite-ns) | Root cause: shared intracellular metabolite pools let LP stack N×ATP from multiple organisms. Fixed: `_merge_community_models` now namespaces `atp_c → atp_c__org1` etc. while keeping extracellular pool shared. T1 rerun pending to confirm ≤45 ceiling. |
+| **T1 results** | ~2,000 high-confidence metabolic hits | 4,491 real t1_pass (3,378 BNF + 1,113 non-BNF) — **COMPLETE** | max=50.0, avg=36.23 mmol NH₄/gDW/h; metabolite-ns namespace fix confirmed cap |
+| **T2 real** | Run after T1 completes | **COMPLETE** — 4,491 communities in 117.5 min, 0 errors | `scripts/t2_dfba_batch.py` built (f46a1a4); 3,378 t2_pass (stability ≥ 0.30) |
+| **T2 intervention** | Full bioinoculant + amendment screen | Metadata-driven picker deployed (bbf03a4); mechanistic screener not yet wired | `intervention_screener.py` exists but not wired; fixed monotony bug where all → drought-tolerant |
+| **Output** | Ranked communities + intervention report + field package | 100 ranked candidates · 11 interventions · FINDINGS.md committed (f8f0995) | Field validation package not yet built; mechanistic intervention screening is next gap |
+| **BNF flux ceiling** | Theoretical max ~45 mmol/gDW/h per diazotroph at 10 mmol glucose | max 50.0 (within expected range); avg 36.23 | Metabolite-ns namespace fix confirmed: shared atp_c was root cause; ceiling now capped at 50.0 by FVA cap constant |
+| **Solver safety** | Any FBA solver | glpk enforced everywhere (c78a0bd) | OSQP/hybrid hangs on AGORA2 models at fraction_of_optimum=0.0 (1,183 lb=-1000 reactions); documented and enforced |

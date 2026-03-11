@@ -34,4 +34,4 @@ conda install -c bioconda qiime2 picrust2 mmseqs2 prokka bracken kraken2 humann3
 
 ## License
 
-MIT — all contributions must be compatible.
+PolyForm Noncommercial 1.0.0 — all contributions must be compatible. Commercial use requires a separate licence from the maintainer.
