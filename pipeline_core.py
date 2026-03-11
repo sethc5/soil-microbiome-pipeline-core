@@ -712,13 +712,37 @@ def run_t2_batch(
 
         sample_id = community.get("sample_id", "unknown")
         sample_row = db.get_sample(sample_id) or {}
+        # Full metadata for establishment predictor + amendment effect model
         metadata = {
-            "soil_ph": sample_row.get("soil_ph", 7.0),
-            "latitude": sample_row.get("latitude"),
-            "longitude": sample_row.get("longitude"),
+            "soil_ph":            sample_row.get("soil_ph", 7.0),
+            "latitude":           sample_row.get("latitude"),
+            "longitude":          sample_row.get("longitude"),
+            "temperature_c":      sample_row.get("temperature_c"),
+            "soil_temp_c":        sample_row.get("temperature_c"),    # alias used by establishment_predictor
+            "organic_matter_pct": sample_row.get("organic_matter_pct"),
+            "clay_pct":           sample_row.get("clay_pct"),
+            "sand_pct":           sample_row.get("sand_pct"),
+            "precipitation_mm":   sample_row.get("precipitation_mm"),
+            "land_use":           sample_row.get("land_use"),
+            "management":         sample_row.get("management"),
+            "sampling_fraction":  sample_row.get("sampling_fraction"),
+            "site_id":            sample_row.get("site_id"),
+            "climate_zone":       sample_row.get("climate_zone"),
         }
 
-        t1_confidence = float(community.get("t1_model_confidence") or 0.35)
+        # T1 flux-based confidence: scale linearly from 0.30 (flux=0) to 0.85 (flux≥50)
+        with db._connect() as _conn:
+            _rrow = _conn.execute(
+                "SELECT t1_target_flux FROM runs WHERE community_id = ? "
+                "ORDER BY run_id DESC LIMIT 1",
+                (community_id,),
+            ).fetchone()
+        _t1_flux = float(_rrow[0] or 0.0) if _rrow else 0.0
+        _flux_conf = 0.30 + min(_t1_flux / 50.0, 1.0) * 0.55
+        t1_confidence = max(
+            float(community.get("t1_model_confidence") or 0.30),
+            _flux_conf,
+        )
 
         # Run dFBA (uses placeholder community model if T1 models unavailable)
         traj = run_dfba(

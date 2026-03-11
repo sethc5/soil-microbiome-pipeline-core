@@ -1,0 +1,138 @@
+# soil-carbon-pipeline/config.yaml — SOC sequestration instantiation
+# Copy of config.example.yaml adapted for soil organic carbon screening.
+# Validate with: python config_schema.py --validate config.soc.yaml
+
+project:
+  name: "soil-carbon-sequestration-pipeline"
+  application: "carbon_sequestration"
+  description: >
+    Identify soil communities with high soil organic carbon (SOC) retention
+    potential for regenerative agriculture systems.  Target: select microbial
+    consortia and amendments that increase stable carbon pools (MAOM + POM)
+    and reduce mineralisation losses.
+  version: "0.1.0"
+
+target:
+  id: "soc_sequestration_cropland"
+  application: "carbon_sequestration"
+  target_function: "soil_organic_carbon_retention"
+  target_flux:
+    # SOC proxy: net acetate/formate secretion minus CO2 excretion
+    soc_retention_pathway:
+      min: 0.1           # mmol C retained / gDW / day
+      optimal: ">0.5"
+      units: "mmol_C_per_gDW_per_day"
+  off_targets:
+    - "methane_production"    # GHG — avoid
+    - "nitrous_oxide_emission" # GHG — avoid
+    - "denitrification"        # N loss — avoid
+  soil_context:
+    ph_range: [5.0, 8.0]
+    texture: ["clay_loam", "silt_loam", "loam", "silty_clay_loam"]
+    climate_zone: ["Cfa", "Cfb", "Dfa", "Dfb", "BSk"]  # temperate/continental
+    land_use: ["cropland", "pasture", "grassland"]
+    crop: "any"
+  intervention_types:
+    - "amendment"       # biochar is primary
+    - "management"      # cover cropping, reduced tillage
+    - "bioinoculant"    # fungal + bacterial decomposers
+
+sequence_source:
+  primary: "sra"
+  sra_query:
+    biome: "agricultural soil"
+    sequencing_type: ["shotgun_metagenome", "16S"]
+    min_depth: 50000
+    metadata_required: ["soil_ph", "latitude", "longitude", "organic_matter_pct"]
+  supplementary:
+    - source: "mgnify"
+      biome_lineage: "root:Environmental:Terrestrial:Agricultural soil"
+    - source: "neon"
+      sites: ["HARV", "ORNL", "TALL", "LAJA", "KONZ", "WOOD"]  # high-SOC NEON sites
+
+filters:
+  t0:
+    min_sequencing_depth: 50000
+    min_observed_otus: 500
+    ph_range: [4.5, 8.5]
+    # SOC-relevant functional genes: lignocellulose decomposition community
+    required_functional_genes:
+      - "laccase"        # Lac — lignin oxidation → stable humus
+      - "peroxidase"     # MnP / LiP — lignin mineralisation check (want LOW)
+    preferred_functional_genes:
+      - "cellulase"      # GH family 5/6/7 — plant residue ingestion
+      - "beta_glucosidase"  # BG — cellulose hydrolysis
+      - "chitin_deacetylase" # fungi proxy
+    min_soil_organic_matter: 1.0    # exclude depleted soils
+    exclude_contaminated: true
+    exclude_annually_tilled: false  # allow; compare outcomes
+  t025:
+    ml_models: ["random_forest_soc", "gradient_boost_functional"]
+    min_function_score: 0.4         # lower threshold than BNF (SOC signal noisier)
+    min_target_gene_abundance: 0.0005
+    reference_db: "reference/high_soc_communities.biom"
+    min_similarity: 0.25
+  t1:
+    fba_engine: "cobrapy"
+    community_size_limit: 25        # SOC communities tend larger
+    genome_db: "patric"
+    # Target: maximize net carbon retention (acetate excretion - CO2 excretion)
+    objective: "maximize_carbon_retention"
+    min_target_flux: 0.1
+    max_fba_walltime_min: 45
+  t2:
+    dynamics_engine: "dfba"
+    simulation_time_days: 120       # longer — SOC builds slowly
+    perturbations:
+      - type: "drought"
+        day: 60
+        severity: 0.4
+      - type: "tillage_event"
+        day: 0
+        severity: 0.3              # simulate spring tillage disturbance
+    intervention_screen:
+      amendments:
+        - type: "biochar"           # primary SOC amendment
+          rates_t_ha: [1, 2, 5, 10]
+        - type: "compost"
+          rates_t_ha: [5, 10, 20]
+        - type: "vermicompost"
+          rates_t_ha: [2, 5]
+        - type: "rock_phosphate"    # P availability — secondary
+          rates_t_ha: [0.5]
+      bioinoculants:
+        - "Trichoderma_harzianum"   # fungal decomposer
+        - "Aspergillus_niger"       # cellulase producer
+        - "Bacillus_subtilis"       # PGPR + biofilm stability
+        - "Pseudomonas_putida"      # rhizosphere coloniser
+      management_practices:
+        - practice: "cover_cropping"
+          predicted_om_increase_pct: 0.5
+          cost_usd_per_ha: 80
+        - practice: "no_till"
+          predicted_om_increase_pct: 0.35
+          cost_usd_per_ha: -50      # negative = cost saving
+        - practice: "biochar_incorporation"
+          predicted_om_increase_pct: 0.8
+          cost_usd_per_ha: 150
+        - practice: "compost_tea_foliar"
+          predicted_om_increase_pct: 0.15
+          cost_usd_per_ha: 40
+    min_stability_score: 0.55       # slightly relaxed — SOC path tolerates more variability
+    min_establishment_prob: 0.35
+
+compute:
+  workers: 8
+  fba_workers: 4
+  batch_size: 1000
+  t1_batch_size: 50
+  t2_batch_size: 5
+  checkpoint_interval: 100
+
+output:
+  db_path: "soc_landscape.db"
+  receipts_dir: "receipts_soc/"
+  results_dir: "results_soc/"
+  top_n: 50
+  export_community_profiles: true
+  export_intervention_report: true
