@@ -18,12 +18,16 @@ Usage:
 
 from __future__ import annotations
 import csv
+import json
 import logging
 import math
 from pathlib import Path
+from typing import Optional
 
+import numpy as np
 import typer
 
+from compute.functional_predictor import FunctionalPredictor
 from db_utils import SoilDB
 
 app = typer.Typer()
@@ -119,8 +123,102 @@ def _check1_t0_pass_rate(db: SoilDB, measured: dict[str, float]) -> dict:
     }
 
 
+def _build_feature_vector(
+    phylum_profile_json: str | None,
+    soil_ph: float | None,
+    organic_matter_pct: float | None,
+    clay_pct: float | None,
+    temperature_c: float | None,
+    precipitation_mm: float | None,
+    feature_names: list[str],
+) -> list[float]:
+    """Build a feature vector in the order expected by the RF surrogate."""
+    pp: dict[str, float] = json.loads(phylum_profile_json or "{}") if phylum_profile_json else {}
+    meta: dict[str, float] = {
+        "soil_ph": soil_ph if soil_ph is not None else 6.5,
+        "organic_matter_pct": organic_matter_pct if organic_matter_pct is not None else 2.5,
+        "clay_pct": clay_pct if clay_pct is not None else 20.0,
+        "temperature_c": temperature_c if temperature_c is not None else 15.0,
+        "precipitation_mm": precipitation_mm if precipitation_mm is not None else 600.0,
+    }
+    row: dict[str, float] = {**{k: pp.get(k, 0.0) for k in feature_names}, **meta}
+    return [row.get(f, 0.0) for f in feature_names]
+
+
+def _check2_with_surrogate(
+    db: SoilDB,
+    measured: dict[str, float],
+    predictor: FunctionalPredictor,
+    threshold: float = 0.6,
+) -> dict:
+    """Check 2 (surrogate path): RF-predicted BNF flux should correlate with measured function.
+
+    Loads phylum_profile + env metadata for each measured sample_id,
+    builds feature vectors, runs predict_batch_with_gate(), and computes
+    Spearman r between predicted flux and measured function.
+    """
+    sample_ids = list(measured.keys())
+    placeholders = ",".join("?" * len(sample_ids))
+
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT c.sample_id, c.phylum_profile, "
+            f"s.soil_ph, s.organic_matter_pct, s.clay_pct, s.temperature_c, s.precipitation_mm "
+            f"FROM communities c "
+            f"JOIN samples s ON c.sample_id = s.sample_id "
+            f"WHERE c.sample_id IN ({placeholders})",
+            sample_ids,
+        ).fetchall()
+
+    if not rows:
+        return {
+            "check": "t025_spearman",
+            "method": "surrogate_rf",
+            "spearman_r": None,
+            "passed": True,
+            "n": 0,
+            "note": "No communities found in DB for measured sample_ids — check passes by default",
+        }
+
+    feat_names = predictor._feature_names
+    feature_matrix: list[list[float]] = []
+    valid_measured: list[float] = []
+
+    for sid, pp_json, ph, om, clay, temp, precip in rows:
+        vec = _build_feature_vector(pp_json, ph, om, clay, temp, precip, feat_names)
+        feature_matrix.append(vec)
+        valid_measured.append(measured[sid])
+
+    X = np.array(feature_matrix, dtype=float)
+    preds, _uncs, _flags = predictor.predict_batch_with_gate(X)
+
+    if len(preds) < 5:
+        return {
+            "check": "t025_spearman",
+            "method": "surrogate_rf",
+            "spearman_r": None,
+            "passed": True,
+            "n": len(preds),
+            "note": "Insufficient paired data (<5) — check passes by default",
+        }
+
+    r = _spearman_r(preds.tolist(), valid_measured)
+    return {
+        "check": "t025_spearman",
+        "method": "surrogate_rf",
+        "spearman_r": round(r, 4),
+        "threshold": threshold,
+        "passed": r >= threshold,
+        "n": len(preds),
+        "note": "Spearman r between RF-surrogate predicted BNF flux and measured function",
+    }
+
+
 def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
-    """Check 2: T0.25 ML score should correlate with measured function (Spearman r > 0.6)."""
+    """Check 2 (legacy path): T0.25 PICRUSt2 pathway count should correlate with measured function.
+
+    Used as fallback when no surrogate model path is provided.
+    """
     with db._connect() as conn:
         rows = conn.execute(
             "SELECT c.sample_id, r.t025_nsti_mean, r.t025_n_pathways "
@@ -138,6 +236,7 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
     if len(paired) < 5:
         return {
             "check": "t025_spearman",
+            "method": "picrust2_n_pathways",
             "spearman_r": None,
             "passed": True,  # not enough data to fail
             "n": len(paired),
@@ -148,11 +247,12 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
     r = _spearman_r(list(xs), list(ys))
     return {
         "check": "t025_spearman",
+        "method": "picrust2_n_pathways",
         "spearman_r": round(r, 4),
         "threshold": 0.6,
         "passed": r >= 0.6,
         "n": len(paired),
-        "note": "Spearman r between T0.25 pathway count and measured function",
+        "note": "Spearman r between T0.25 PICRUSt2 pathway count and measured function",
     }
 
 
@@ -201,6 +301,11 @@ def validate(
     measured_function: Path = typer.Option(..., help="CSV with sample_id, measured_function columns"),
     db: Path = typer.Option(Path("landscape.db")),
     spearman_threshold: float = typer.Option(0.6, help="Minimum acceptable Spearman r for Check 2"),
+    model_path: Optional[Path] = typer.Option(
+        None,
+        help="Path to functional_predictor.joblib for RF-surrogate Check 2 "
+             "(falls back to PICRUSt2 pathway count if not provided)",
+    ),
     output: Path = typer.Option(Path("results/validation_report.json")),
 ):
     """Validate pipeline output against known reference communities."""
@@ -210,15 +315,25 @@ def validate(
     measured = _load_measured_function(measured_function)
     logger.info("Loaded %d samples with measured function values", len(measured))
 
+    # Check 2: prefer RF surrogate when model path is given
+    if model_path and model_path.exists():
+        logger.info("Loading RF surrogate from %s for Check 2", model_path)
+        predictor = FunctionalPredictor.load(str(model_path))
+        check2 = _check2_with_surrogate(database, measured, predictor, threshold=spearman_threshold)
+    else:
+        if model_path:
+            logger.warning("--model-path %s not found; falling back to PICRUSt2 proxy", model_path)
+        check2 = _check2_t025_correlation(database, measured)
+
     checks = [
         _check1_t0_pass_rate(database, measured),
-        _check2_t025_correlation(database, measured),
+        check2,
         _check3_t1_flux_magnitude(database, measured),
     ]
 
-    # Override threshold from CLI arg
+    # Override threshold from CLI arg (for legacy path; surrogate path sets it directly)
     for c in checks:
-        if c["check"] == "t025_spearman":
+        if c["check"] == "t025_spearman" and c.get("method") == "picrust2_n_pathways":
             c["threshold"] = spearman_threshold
             if c.get("spearman_r") is not None:
                 c["passed"] = c["spearman_r"] >= spearman_threshold
@@ -231,7 +346,6 @@ def validate(
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    import json
     output.write_text(json.dumps(report, indent=2))
 
     for c in checks:
