@@ -1,8 +1,11 @@
 # Pipeline Status Log
 
-**Last updated**: 2026-03-10 (session 3)  
-**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `25de5c8`  
-**Server**: `deploy@<HETZNER2_HOST>` (Hetzner AX41, `/opt/pipeline/`, `/data/pipeline/`)
+**Last updated**: 2026-03-10 (session 4 — FINDINGS.md refresh + deployment doc)  
+**Repo**: `sethc5/soil-microbiome-pipeline-core` — branch `main` @ `2b5d343`  
+**Compute**: `deploy@144.76.222.125` (`hetzner2`) — Xeon W-2295 / 36 threads / 252 GB RAM  
+**Pipeline dir**: `/opt/pipeline/` (git clone + venv) · **DB**: `/data/pipeline/db/soil_microbiome.db`  
+**Dev machine**: `dell5` (local) — code, git, VS Code  
+See [docs/deployment.md](deployment.md) for full infrastructure detail.
 
 ---
 
@@ -67,32 +70,37 @@
 
 ## Findings in DB
 
-FINDINGS.md fully refreshed from real DB (commit f8f0995). Full content:
+FINDINGS.md refreshed on hetzner2 Mar 11 02:53 UTC (`findings_generator.py`). Pulled and committed session 4.
 
-| Section | Data |
-|---------|------|
-| Pipeline run summary | 23,378 communities, 4,491 T1-pass, 3,378 T2-pass |
-| BNF × land use | Rangeland/grassland highest flux |
-| BNF stability analysis | 90% mean retention, CLBJ + GUAN top sites |
-| Taxa enrichment | 27/122 NEON phyla significant; Proteobacteria (3.2×) enriched |
-| Spatial clusters | 7 clusters, Puerto Rico cluster mean 311.0, 6,413-point CONUS kriging grid |
-| Ranked candidates | Top 100 communities |
-| Interventions | 11 recommendations |
+| Section | Key Result |
+|---------|------------|
+| Run summary | 457,662 screened · 451,122 T0-pass · 4,958 T1 models · 24,491 T2 simulated |
+| BNF trajectory | 23,378 communities · mean peak 4.95 mmol/gDW/h · max 38.6 (CLBJ) · 90% retention |
+| Spatial clusters | 7 clusters · Puerto Rico mean 311.0 · 6,413-pt CONUS kriging grid |
+| Taxa enrichment | Nitrososphaerota 8.15× · Deinococcota 6.02× · Thermomicrobiota 5.91× enriched |
+| Keystone architecture | 20,000 T1-pass · 7.7 keystones/community · 88% flux-drop if any removed |
+| Intervention portfolio | 200,000 interventions · bioinoculant 28× better cost-efficiency than management |
+| Correlation | soil pH Spearman r=0.25 (strongest predictor) |
+| Top community | #442609 · top flux 378.4 mmol/gDW/h |
 
 ---
 
-## Analysis Outputs (`results/`)
+## Analysis Outputs (`results/` on hetzner2 `/opt/pipeline/results/`)
 
 | File | Description | Status |
 |------|-------------|--------|
-| `bnf_trajectory_summary.csv` | dFBA trajectories, 23,378 rows | ✓ |
-| `ranked_candidates.csv` | Top 100 ranked BNF communities | ✓ |
-| `keystone_analysis.csv` | Leave-one-out keystone taxa | ✓ |
-| `taxa_enrichment.csv` | 27/122 NEON phyla significant | ✓ |
-| `spatial/bnf_spatial_map.png` | Dark-background kriging heatmap + cluster scatter | ✓ |
-| `intervention_portfolio.csv` | 11 interventions, cost-effectiveness ranking | ✓ |
-| `site_bnf_timeseries.csv` | Per-site BNF trajectory (multi-visit NEON) | Runnable |
-| `results/validation_report.json` | validate_pipeline.py output | Runnable |
+| `bnf_trajectory_summary.csv` | dFBA BNF trajectories, 23,378 rows (1 MB) | ✓ Mar 11 |
+| `ranked_candidates.csv` | Top 100 ranked BNF communities | ✓ Mar 11 |
+| `taxa_enrichment.csv` | Phyla enrichment — Nitrososphaerota 8.15× top | ✓ Mar 11 |
+| `correlation_scan.json` | Spearman correlations — soil_ph r=0.25 strongest | ✓ Mar 11 |
+| `intervention_report.md/json` | 11 ranked intervention recommendations | ✓ Mar 11 |
+| `intervention_portfolio.csv` | 200k interventions, cost-effectiveness breakdown | ✓ Mar 11 |
+| `spatial/bnf_spatial_map.png` | CONUS kriging heatmap + cluster scatter | ✓ Mar 11 |
+| `bnf_kriging_grid_conus.csv` | 6,413-point kriging grid (175 KB) | ✓ Mar 11 |
+| `bnf_site_summary.csv` | Per-site BNF summary | ✓ Mar 11 |
+| `keystone_organism_summary.csv` | Keystone frequency across communities | ✓ |
+| `site_bnf_timeseries.csv` | Multi-visit NEON BNF trajectory | Runnable |
+| `validation_report.json` | `validate_pipeline.py` output | Runnable |
 
 ---
 
@@ -144,16 +152,16 @@ FINDINGS.md fully refreshed from real DB (commit f8f0995). Full content:
 
 ---
 
-## Recent Commits (HEAD → `25de5c8`)
+## Recent Commits (HEAD → `2b5d343`)
 
 ```
+2b5d343  docs: add database_schema.md — full 8-table column reference with query examples
+4002292  docs: update README, STATUS, and pipeline diagrams to current state
 25de5c8  chore: tidy and organise repo structure
 1429734  feat(items 5-8): AGORA2 plan, SOC config, T2 metadata enrichment, site BNF tracker
 6ee5d79  feat(validate): upgrade Check 2 to RF-surrogate Spearman test; add make_reference_bnf.py
 cf5e081  feat(t025): train BNF surrogate RF predictor from 5907 real samples; wire classifier gate
 828d893  docs: update Diagram 2 to current state; fix licence in CONTRIBUTING
-f8f0995  feat(findings): add Spatial Distribution & Kriging section; add make_spatial_map.py
-cf9ef98  findings: refresh from real DB (23,378 communities, NEON taxa enrichment)
 ```
 
 ---
