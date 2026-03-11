@@ -6,7 +6,53 @@ A single gram of healthy soil contains ~10,000 bacterial species, ~200 meters of
 
 This pipeline provides systematic infrastructure to scan that space. The "candidates" here are not molecules or crystal structures — they are **microbial community compositions, functional guilds, and intervention strategies** (bioinoculants, amendments, land management practices) predicted to shift soil microbiome function toward a defined target state. The same 4-tier funnel logic from [biochem-pipeline-core](https://github.com/sethc5/biochem-pipeline-core), [materials-pipeline-core](https://github.com/sethc5/materials-pipeline-core), and [genomics-pipeline-core](https://github.com/sethc5/genomics-pipeline-core) applies — cheap filters first, expensive simulation last, everything logged to a database that accumulates scientific value over time.
 
-> **Status**: T1 + T2 complete · 4,491 real communities screened · BNF surrogate RF trained (ROC-AUC 0.812) · AGORA2 integration planned · [Contributors welcome](CONTRIBUTING.md)
+> **Status (2026-03-11):** T0 → T0.25 → T1 → T2 running end-to-end on NEON 16S + MGnify data · **4,830 T1-pass, 3,378 T2-pass communities** · BNF surrogate RF trained (ROC-AUC 0.812) · 11 field-ready intervention recommendations · AGORA2 genus-proxy approach (MAG/CarveMe gap open) · [Contributors welcome](CONTRIBUTING.md)
+
+**Key documents:**
+- [docs/pipeline_process_diagrams.md](docs/pipeline_process_diagrams.md) — reference model, current implementation, and planned additions as process flow diagrams
+- [reference/hetzner2_state_20260311.md](reference/hetzner2_state_20260311.md) — server inventory: DB funnel, data resources, tool status
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+
+---
+
+## Current State (2026-03-11)
+
+### Live Screening Funnel
+
+> Numbers from `/data/pipeline/db/soil_microbiome.db` on hetzner2 (`144.76.222.125`).  Deployed commit: `8a09e09`.
+
+| Stage | Filter | NEON 16S | MGnify | Synthetic | Total |
+|---|---|---|---|---|---|
+| Ingested | — | 17,567 | 95 | 220,000 | 237,662 |
+| **T0 pass** | Quality + metadata + diversity | 11,026 | 95 | 220,000 | 231,121 |
+| **T0.25 pass** | BNF surrogate RF (ROC-AUC 0.812) | 3,564 | 95 | 220,000 | 223,659 |
+| **T1 pass** | AGORA2-proxy community FBA | 4,768 | 62 | 0 | 4,830 |
+| **T2 pass** | dFBA stability ≥ 0.30 | 3,323 | 55 | 0 | 3,378 |
+
+Synthetic communities pass T0/T0.25 pipeline gates but have not been sent through FBA ($T1/T2 = 0$) by design — they are used for surrogate training only.
+
+### What Is Actually Working
+
+| Tier | What runs | Engine | Notes |
+|---|---|---|---|
+| **T0** | Quality filter, metadata check, diversity metrics, nifH presence flag | vsearch SILVA 138, scikit-bio | nifH detected by taxonomy proxy (Diazotrophia taxa), not sequence-level HMM |
+| **T0.25** | BNF functional prediction | RF surrogate (`bnf_surrogate_classifier.joblib`) | `predict_with_gate()` returns flux + uncertainty + gate_pass |
+| **T1** | Community FBA flux scoring | COBRApy + 20 AGORA2 genus models (9 patched with NITROGENASE_MO) | Genus-proxy approach — not per-sample MAGs |
+| **T2** | dFBA stability + heuristic intervention screen | COBRApy dFBA + `intervention_screener.py` | Intervention screen is metadata-driven, not mechanistic |
+| **Post** | BNF kriging, ranked candidates, intervention report | geopandas, scikit-learn | 11 field-ready recommendations, CONUS heatmap |
+
+### Known Gaps vs Reference Architecture
+
+| Gap | Severity | What's Missing | Path to Close |
+|---|---|---|---|
+| **G1: SRA/EMP/Qiita feed** | 🔴 Structural | Adapters exist; 0 samples ingested — no SRA download jobs run | Run `ncbi_sra_adapter.py` bulk download for dryland wheat query |
+| **G2: Sequence-level nifH** | 🟡 Scientific | T0 uses taxonomy proxy; reference uses HMM/BLAST on nifH protein family | Add `hmmer` or `diamond blastp` call to `functional_gene_scanner.py` |
+| **G3: PICRUSt2 ref DB** | 🟡 Scientific | PICRUSt2 stub installed; `/data/pipeline/picrust2_ref/` empty | Run `picrust2_install_files.sh` (~2GB download) |
+| **G4: Per-sample MAG models** | 🔴 Structural | 20 AGORA2 genus-level proxy models vs CarveMe per-sample assemblies | Install MetaBat2/DRAM/Prokka; connect to SRA shotgun assembly |
+| **G5: T1 flux ceiling** | 🟡 Data quality | Max flux 378 mmol/gDW/h in DB (biological ceiling ~45); cap constant 50 set in code but legacy uncapped runs remain | Audit `WHERE t1_pass=1 AND t1_target_flux > 50`; re-run or cap-clip |
+| **G6: Mechanistic T2 interventions** | 🟡 Scientific | `intervention_screener.py` is metadata heuristic, not COBRApy addition model | Implement organism-addition FBA in T2 screener |
+| **G7: HUMAnN3 functional profile** | 🔶 Aspirational | Requires shotgun — not applicable until SRA connected | Blocked on G1 |
+| **G8: Similarity search (T0.25)** | 🟡 Scientific | `community_similarity.py` offline; surrogate is only active T0.25 unit | Re-enable after reference DB built from T2-pass communities |
 
 ---
 
@@ -40,7 +86,9 @@ These differences justify a separate codebase. The architectural pattern (4-tier
 
 ---
 
-## Architecture
+## Reference Architecture (Design Target)
+
+> This section describes the intended end-state architecture. For what is actually running today, see [Current State](#current-state-2026-03-11) above and [Diagram 2 in pipeline_process_diagrams.md](docs/pipeline_process_diagrams.md).
 
 ### The 4-Tier Screening Funnel
 
@@ -756,75 +804,98 @@ For reduced tillage, cover crops, irrigation scheduling:
 
 ## Quick Start
 
+### What actually runs today (16S + NEON/MGnify data)
+
 ```bash
 git clone https://github.com/sethc5/soil-microbiome-pipeline-core.git
 cd soil-microbiome-pipeline-core
-python -m venv venv
-source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-# Install non-Python dependencies
-conda install -c bioconda qiime2 picrust2 mmseqs2 prokka
-
-# Install CarveMe for metabolic model construction
-pip install carveme
-diamond makedb --in /path/to/uniprot_sprot.fasta -d diamond_db
+# Required system tools
+apt install vsearch                   # chimera check + SILVA classification
+pip install carveme                   # metabolic model construction (CarveMe 1.6.6)
+# SILVA 138 ref DB and NCBI taxdump go to /data/pipeline/ref/
 
 # Validate config
-python config_schema.py --validate path/to/config.yaml
+python config_schema.py --validate config.example.yaml
 
 # Run known community validation (mandatory first step)
 python validate_pipeline.py \
-  --config config.yaml \
-  --reference_communities reference/high_bnf_communities.biom \
+  --config config.example.yaml \
   --measured_function reference/bnf_measurements.csv \
   --model-path models/bnf_surrogate_classifier.joblib
 
-# Run T0 + T0.25 (fast, no metabolic modeling)
-python pipeline_core.py --config config.yaml --tier 025 -w 8
+# Ingest NEON 16S data (what we actually run)
+python adapters/neon_adapter.py --sites GUAN,KONZ,OSBS,TALL
 
-# Run full pipeline
-python pipeline_core.py --config config.yaml -w 4 --fba-workers 4
+# Run T0 + T0.25 (fast, no FBA)
+python pipeline_core.py --config config.example.yaml --tier 025 -w 8
 
-# Merge receipts from remote runs
-python merge_receipts.py --list
+# Run T1 FBA batch (AGORA2 genus-proxy models)
+python scripts/t1_fba_batch.py
+
+# Run T2 dFBA batch
+python scripts/t2_dfba_batch.py
+
+# Merge receipts from hetzner2 remote runs
 python merge_receipts.py
 
-# Generate findings and intervention report
-python findings_generator.py --config config.yaml
-python intervention_report.py --config config.yaml --top 20
+# Generate results
+python findings_generator.py --config config.example.yaml
+python rank_candidates.py
+python spatial_analysis.py
+python intervention_report.py --config config.example.yaml --top 20
+```
+
+### What is aspirational (reference architecture — not yet running)
+
+```bash
+# SRA shotgun download (adapters exist, 0 samples ingested — Gap G1)
+python adapters/ncbi_sra_adapter.py \
+  --query "soil[biome] AND wheat[associated_taxon]" --type shotgun_metagenome
+
+# PICRUSt2 functional prediction (ref DB empty — Gap G3)
+picrust2_install_files.sh          # ~2 GB download required first
+
+# Per-sample MAG assembly pipeline (MetaBat2/DRAM/Prokka not installed — Gap G4)
+# megahit → metabat2 → checkm → prokka → carveme → community FBA
+
+# Sequence-level nifH detection (currently taxonomy proxy — Gap G2)
+hmmsearch --tblout nifh_hits.tsv nifH.hmm proteomes.faa
 ```
 
 ---
 
 ## Tool Stack
 
-| Layer | Tool | Why |
-|-------|------|-----|
-| 16S processing | `qiime2` | Standard amplicon pipeline |
-| Shotgun taxonomy | `bracken` + `kraken2` | Fast, accurate read classification |
-| Shotgun function | `humann3` | Functional profile from shotgun metagenomes |
-| Fast function pred | `picrust2` | Functional prediction from 16S |
-| Diversity metrics | `scikit-bio` | Shannon, Faith PD, UniFrac |
-| Sequence alignment | `mmseqs2` | Fast homology for functional gene detection |
-| ML prediction | `scikit-learn` | RF/GBM for T0.25 functional prediction |
-| Genome annotation | `prokka` | Fast bacterial genome annotation |
-| Genome completeness | `checkm-genome` | Completeness/contamination for model confidence |
-| Metabolic models | `carveme` | Automated genome-scale model construction |
-| Community FBA | `cobrapy` | Community flux balance analysis |
-| dFBA dynamics | `cobra` + `scipy` | Dynamic FBA time-course simulation |
-| Phylogenetics | `ete3` | Phylogenetic tree construction and analysis |
-| Motif/biosynthesis | `antismash` | Biosynthetic gene cluster detection |
-| Data format | `biom-format` | Standard microbiome table format |
-| Sequence I/O | `biopython` | FASTA/FASTQ handling |
-| Metagenome assembly | `megahit` | De novo assembly for novel MAGs (optional) |
-| Binning | `metabat2` | MAG binning from assembled contigs (optional) |
-| Geospatial | `geopandas` | Geographic distribution analysis |
-| Config validation | `pydantic` | Schema validation |
-| CLI | `typer` | Clean CLI |
-| Progress/logging | `rich` | Readable output |
-| Database | `sqlite3` (stdlib) | Zero infrastructure |
-| Parallel processing | `concurrent.futures` | T0 batch parallelism |
+Tools annotated by actual deployment status on hetzner2 as of 2026-03-11.
+
+| Layer | Tool | Status | Notes |
+|---|---|---|---|
+| 16S classification | `vsearch` + SILVA 138 | ✅ Running | Chimera removal + taxonomy |
+| ML prediction | `scikit-learn` RF | ✅ Running | T0.25 surrogate (ROC-AUC 0.812) |
+| Community FBA | `cobrapy` 0.30.0 | ✅ Running | GLPK solver enforced (OSQP unsafe) |
+| dFBA dynamics | `cobra` + `scipy` | ✅ Running | T2 stability scoring |
+| Metabolic models | AGORA2 genus SBML | ✅ Running | 20 genera, 9 patched with NITROGENASE_MO |
+| Geospatial | `geopandas` 1.1.2 | ✅ Running | Kriging heatmap (CONUS) |
+| Genome models | `carveme` 1.6.6 | ⚠️ pip installed | Binary not in `$PATH`; not yet called in pipeline |
+| Data ingestion (NEON) | `neon_adapter.py` | ✅ Running | 17,567 samples ingested |
+| Data ingestion (MGnify) | `mgnify_adapter.py` | ✅ Running | 95 samples |
+| Data ingestion (SRA) | `ncbi_sra_adapter.py` | ❌ 0 samples | Adapter exists; no SRA jobs run yet |
+| Data ingestion (EMP/Qiita) | `emp_adapter.py`, `qiita_adapter.py` | ❌ 0 samples | Adapters exist; not connected |
+| Functional prediction | `picrust2` | ❌ Ref DB empty | Stub installed; `/data/pipeline/picrust2_ref/` empty |
+| Shotgun function | `humann3` | ❌ Not installed | Requires shotgun reads; blocked on SRA |
+| Genome annotation | `prokka` | ❌ Not installed | Needed for reference T1 (MAG binning path) |
+| MAG binning | `metabat2` | ❌ Not installed | Needed for reference T1 |
+| Genome completeness | `checkm-genome` | ❌ Not installed | Needed for model confidence scoring |
+| Diversity metrics | `scikit-bio` | ✅ Running | Shannon, Chao1, Faith PD |
+| Taxonomy → function | `FaProTax` | ❌ Not installed | T0.25 profiling; fallback to surrogate |
+| Sequence alignment | `vsearch` (BLAST mode) | ✅ Running | nifH detection via taxonomy proxy |
+| Geospatial | `geopandas` | ✅ Running | — |
+| Config validation | `pydantic` | ✅ Running | — |
+| Database | `sqlite3` stdlib | ✅ Running | 528 MB on hetzner2 |
 
 ---
 
@@ -832,7 +903,7 @@ python intervention_report.py --config config.yaml --top 20
 
 | Repo | Target Function | Application | Status |
 |------|----------------|-------------|--------|
-| [nitrogen-fixation-pipeline](https://github.com/sethc5/nitrogen-fixation-pipeline) | BNF flux, nifH activity | Fertilizer reduction | ✅ T1+T2 complete · 4,491 communities · surrogate trained |
+| [nitrogen-fixation-pipeline](https://github.com/sethc5/nitrogen-fixation-pipeline) | BNF flux, nifH activity | Fertilizer reduction | ✅ T0→T2 running · **4,830 T1-pass, 3,378 T2-pass** · surrogate ROC-AUC 0.812 · 11 field recommendations · [gaps](README.md#known-gaps-vs-reference-architecture) |
 | carbon-sequestration-pipeline | SOC accumulation rate | Climate mitigation | 🔶 Config instantiated (`configs/soil_carbon.yaml`) |
 | bioremediation-pipeline | Hydrocarbon degradation flux | Contaminated site cleanup | 📋 Planned |
 | plant-growth-promotion-pipeline | Rhizosphere PGP activity | Crop yield improvement | 📋 Planned |
