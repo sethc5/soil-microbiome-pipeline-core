@@ -55,19 +55,21 @@ else
 fi
 
 # Count T1-eligible communities after 16S classification
-CLASSIFIED=$($PYTHON - <<PYEOF 2>/dev/null || echo "0"
-import sqlite3
-db = sqlite3.connect("$DB")
-n = db.execute("""
-    SELECT COUNT(*) FROM communities c
-    JOIN runs r ON c.sample_id=r.sample_id
-    JOIN samples s ON r.sample_id=s.sample_id
-    WHERE s.source=neon AND r.t0_pass=1 AND r.t1_pass IS NULL
-      AND c.top_genera NOT IN ([],{},null,) AND c.top_genera IS NOT NULL
-""").fetchone()[0]
+# Single-quoted SQL avoids bash heredoc quoting issues with triple-quotes
+CLASSIFIED=$($PYTHON -c '
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+n = db.execute(
+    "SELECT COUNT(*) FROM communities c"
+    " JOIN runs r ON c.sample_id=r.sample_id"
+    " JOIN samples s ON r.sample_id=s.sample_id"
+    " WHERE s.source IN (\"neon\",\"mgnify\")"
+    "   AND r.t0_pass=1 AND r.t1_pass IS NULL"
+    "   AND c.top_genera IS NOT NULL"
+    "   AND c.top_genera NOT IN (\"[]\",\"{}\",\"null\",\"\")"
+).fetchone()[0]
 print(n)
-PYEOF
-)
+' "$DB" 2>/dev/null || echo "0")
 log "NEON communities eligible for T1 after 16S: $CLASSIFIED"
 
 # ---------------------------------------------------------------------------
