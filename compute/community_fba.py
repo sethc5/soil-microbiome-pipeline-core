@@ -101,10 +101,17 @@ def _apply_environmental_constraints(model: Any, metadata: dict) -> None:
 #   = 10 mmol_glucose × 40 ATP/glucose / 16 ATP per N₂ ≈ 25 mmol_rxn/gDW/h
 # → t1_target_flux ceiling = 25 × 2 NH₄/rxn = 50 mmol NH₄-equiv/gDW/h
 # This cap is applied post-FVA to discard thermodynamic-cycling LP artifacts:
-# AGORA2 models typically carry 800+ reversible internal reactions (lb=-1000);
+# AGORA2 models typically carry 1 100+ reversible internal reactions (lb=-1000);
 # under the 90%-growth FVA objective, ADK1/G3PD/PTAr-family cycles can generate
 # ATP far beyond the glucose budget (confirmed: Sinorhizobium FVA gives 54
 # vs 25 from direct FBA — excess comes purely from internal cycling, not biology).
+#
+# Related solver hazard: if the FVA is run with fraction_of_optimum=0.0
+# (unconstrained) AND using the hybrid/OSQP solver, the same lb=-1000 reactions
+# cause OSQP to spin indefinitely (iterative solver cannot detect unboundedness
+# the way simplex can).  Confirmed: 4+ hour hang on Bradyrhizobium (1 183
+# lb=-1000 reactions), Mar-2026.  Always use glpk for unconstrained FVA, or
+# keep fraction_of_optimum ≥ 0.9 when using hybrid.
 _BNF_NITROGENASE_FVA_RXN_CAP: float = 25.0  # mmol NITROGENASE_MO rxn/gDW/h
 
 # EX_* IDs that are inorganic / non-N-source and should remain open.

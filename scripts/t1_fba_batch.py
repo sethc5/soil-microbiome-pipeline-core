@@ -331,6 +331,22 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
     # is importable — optlang may not have the highs_interface even if highspy
     # is installed, which causes model.solver = "highs" to raise ValueError.
     # NOTE: COBRApy/optlang exposes HiGHS as "hybrid", not "highs".
+    #
+    # SOLVER SAFETY NOTES (confirmed empirically on Bradyrhizobium, 3 235 reactions):
+    # ┌──────────┬────────────┬──────────────────────────────────────────────────┐
+    # │ Solver   │ Algorithm  │ Safe for FVA on AGORA2?                          │
+    # ├──────────┼────────────┼──────────────────────────────────────────────────┤
+    # │ glpk     │ Simplex    │ Always (detects unboundedness in one pivot)       │
+    # │ hybrid   │ OSQP/ADMM  │ ONLY when fraction_of_optimum > 0 (e.g. 0.9).   │
+    # │ (=osqp)  │ (iterative)│ At fraction_of_optimum=0.0 (unconstrained),      │
+    # │          │            │ AGORA2's 1 100+ lb=-1000 reversible reactions     │
+    # │          │            │ make the feasible region effectively unbounded;   │
+    # │          │            │ OSQP iterates indefinitely instead of detecting   │
+    # │          │            │ unboundedness — confirmed 4+ hour hang (Mar-2026).│
+    # └──────────┴────────────┴──────────────────────────────────────────────────┘
+    # Production FVA here uses fraction_of_optimum=0.9, so hybrid is safe.
+    # NEVER benchmark or call FVA with hybrid at fraction_of_optimum=0.0 on
+    # raw AGORA2 models without first tightening all lb=-1000 bounds.
     _SOLVER = "glpk"
     try:
         import cobra.util.solver as _cs
@@ -473,6 +489,11 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             fva_min, fva_max = 0.0, 0.0
             if t1_pass and target_rxns:
                 try:
+                    # fraction_of_optimum=0.9 is deliberate: it keeps the LP
+                    # feasible region bounded (model must sustain ≥90% max growth)
+                    # which prevents OSQP/hybrid from diverging on lb=-1000
+                    # reactions.  Do NOT lower this to 0.0 without switching the
+                    # community's solver back to glpk first — see solver notes above.
                     fva_result = cobra.flux_analysis.flux_variability_analysis(
                         community, reaction_list=target_rxns,
                         fraction_of_optimum=0.9, processes=1,
