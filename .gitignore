@@ -21,7 +21,8 @@ profiles/
 humann3_out/
 picrust2_out/
 annotations/
-models/
+models/*
+!models/README.md
 
 # Reference data (curated, not checked in)
 reference/*.biom

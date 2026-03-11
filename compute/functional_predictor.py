@@ -45,6 +45,11 @@ class FunctionalPredictor:
 
     Supported model_type values: 'random_forest', 'gradient_boost'.
     OTU features should be CLR-transformed before training (see clr_transform()).
+
+    The canonical models/functional_predictor.joblib may also include a
+    RandomForestClassifier gate (key ``classifier``) trained to screen obvious
+    BNF non-passers at T0.25 before the regressor runs.  Use
+    ``predict_with_gate()`` to get the full two-stage prediction.
     """
 
     VALID_MODEL_TYPES = ("random_forest", "gradient_boost")
@@ -58,6 +63,7 @@ class FunctionalPredictor:
         self._model: Any = None  # scikit-learn estimator
         self._feature_names: list[str] = []
         self._apply_clr: bool = True  # whether OTU features need CLR transform
+        self._classifier: Any = None  # optional pass/fail gate pipeline
 
     # ------------------------------------------------------------------
     # Training
@@ -135,6 +141,8 @@ class FunctionalPredictor:
 
         uncertainty_estimate is the std-dev of individual tree predictions
         (for RandomForest) or a proxy uncertainty (0.0) for GradientBoost.
+
+        Does NOT apply the classifier gate — use predict_with_gate() for that.
         """
         if self._model is None:
             raise RuntimeError("No model loaded or trained — call train() or load() first.")
@@ -161,6 +169,60 @@ class FunctionalPredictor:
             uncertainty = float(tree_preds.std())
 
         return point_estimate, uncertainty
+
+    def predict_with_gate(
+        self,
+        features: np.ndarray | list,
+        gate_threshold: float = 0.4,
+    ) -> tuple[float, float, bool]:
+        """Two-stage prediction: classifier gate then regressor.
+
+        First runs the pass/fail classifier (if available). If the predicted
+        BNF-pass probability is below ``gate_threshold``, returns (0.0, 0.0,
+        False) immediately — no regressor call needed.
+
+        Returns:
+            (predicted_flux, uncertainty, predicted_pass)
+        """
+        X = np.asarray(features, dtype=float)
+        if X.ndim == 1:
+            X = X[np.newaxis, :]
+        X_proc = clr_transform(X) if self._apply_clr else X
+
+        if self._classifier is not None:
+            pass_prob = float(self._classifier.predict_proba(X_proc)[0, 1])
+            if pass_prob < gate_threshold:
+                return 0.0, 0.0, False
+
+        flux, unc = self.predict(features)
+        return flux, unc, True
+
+    def predict_batch_with_gate(
+        self,
+        X: np.ndarray,
+        gate_threshold: float = 0.4,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Batch two-stage prediction.
+
+        Returns:
+            (predictions, uncertainties, pass_flags)  each shape (n_samples,)
+        """
+        X = np.asarray(X, dtype=float)
+        X_proc = clr_transform(X) if self._apply_clr else X
+
+        pass_flags = np.ones(len(X), dtype=bool)
+        if self._classifier is not None:
+            pass_probs = self._classifier.predict_proba(X_proc)[:, 1]
+            pass_flags = pass_probs >= gate_threshold
+
+        predictions  = np.zeros(len(X), dtype=float)
+        uncertainties = np.zeros(len(X), dtype=float)
+        if pass_flags.any():
+            preds, uncs = self.predict_batch(X[pass_flags])
+            predictions[pass_flags]   = preds
+            uncertainties[pass_flags] = uncs
+
+        return predictions, uncertainties, pass_flags
 
     def predict_batch(
         self,
@@ -221,10 +283,14 @@ class FunctionalPredictor:
             raise ImportError("joblib is required: pip install joblib") from exc
 
         payload = joblib.load(str(model_path))
-        obj = cls(model_type=payload["model_type"])
+        obj = cls(model_type=payload["model_type"] if payload.get("model_type") in cls.VALID_MODEL_TYPES else "random_forest")
         obj._model = payload["model"]
         obj._feature_names = payload.get("feature_names", [])
         obj._apply_clr = payload.get("apply_clr", True)
+        # Load classifier gate if present (set by train_bnf_surrogate.py)
+        obj._classifier = payload.get("classifier", None)
+        if obj._classifier is not None:
+            logger.info("FunctionalPredictor: classifier gate loaded")
         logger.info("FunctionalPredictor loaded from %s", model_path)
         return obj
 
