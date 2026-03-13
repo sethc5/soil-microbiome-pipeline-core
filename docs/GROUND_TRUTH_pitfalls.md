@@ -180,6 +180,40 @@ same label. The statistical power for between-site prediction is determined by n
 
 ---
 
+## Pitfall 9 — top_genera Provenance Unknown (Potential Circular Feature)
+
+**What happened:** Investigating genus-level features for RF v3, discovered that
+`communities.top_genera` contains only 26 BNF-curated genera in
+`[{"name": ..., "rel_abundance": ...}]` list-of-dicts format — different from the flat
+dict `{genus: freq}` that `process_neon_16s.py` (vsearch) produces. All 26 genera are
+BNF-relevant (*Azotobacter*, *Frankia*, *Rhizobium*, *Azospirillum*, etc.) appearing
+with suspiciously uniform ~45% frequency across samples.
+
+**Evidence:**
+- Real vsearch/SILVA classification on 100K diverse NEON soil samples would produce
+  hundreds of unique genera with a power-law frequency distribution
+- Instead: exactly 26 genera, all BNF-curated, appearing in 44K–47K of 100K samples (40–47%)
+- Format mismatch: process_neon_16s.py saves `{genus: freq}` dicts; DB has `[{name, rel_abundance}]` lists
+- This format matches the output of FBA-based genus prediction pipelines
+
+**Most likely source:** The legacy `scripts/legacy/t1_fba_batch.py` or similar FBA pipeline step
+that predicted BNF-relevant genus contributions from phylum profiles + metabolic models.
+
+**Cost (potential):** If `top_genera` had been added as RF v3 features without investigating,
+the model would have trained on FBA-derived predictions as features, creating partial circularity
+(FBA output → RF input → RF trained to predict BNF, which FBA was also predicting).
+
+**Fix:** RF v3 (`apps/bnf/scripts/retrain_bnf_surrogate_v3.py`) explicitly excludes `top_genera`
+and documents why. Expanded env features (N, P, moisture, bulk_density) used instead.
+
+**To resolve:** Confirm the actual source by checking which script last populated `top_genera`
+in the DB (compare process_neon_16s.py output format vs actual DB content on a per-sample basis).
+
+**Rule:** Before using any DB column as an ML feature, verify its provenance:
+"Was this column populated by a model/prediction, or by raw measurement/classification?"
+
+---
+
 ## Summary Table
 
 | Pitfall | Discovered | Cost | Status |
@@ -192,3 +226,4 @@ same label. The statistical power for between-site prediction is determined by n
 | Unprotected .joblib in git | 2026-03-12 | Near 3.7 GB commit | Fixed |
 | T0 as BNF discriminator | 2026-03-12 | False failure signal | Fixed |
 | n_samples ≠ n_sites power | 2026-03-12 | Overstated confidence | Documented |
+| top_genera provenance unknown | 2026-03-13 | Near-circular feature avoided | Pending confirm |
