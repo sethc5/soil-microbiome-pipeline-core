@@ -95,23 +95,22 @@ def _check1_t0_pass_rate(db: SoilDB, measured: dict[str, float]) -> dict:
     high_ids = {sid for sid, v in measured.items() if v >= median_val}
     low_ids = {sid for sid, v in measured.items() if v < median_val}
 
-    with db._connect() as conn:
-        def pass_rate(sample_ids: set[str]) -> float:
-            if not sample_ids:
-                return 0.0
-            placeholders = ",".join("?" * len(sample_ids))
-            rows = conn.execute(
-                f"SELECT r.t0_pass FROM runs r "
-                f"JOIN communities c ON r.community_id = c.community_id "
-                f"WHERE c.sample_id IN ({placeholders})",
-                list(sample_ids),
-            ).fetchall()
-            if not rows:
-                return float("nan")
-            return sum(1 for r in rows if r[0]) / len(rows)
+    # Query all T0 results and filter in Python (avoids SQLite's 999-variable IN limit)
+    all_rows = db.conn.execute(
+        "SELECT c.sample_id, r.t0_pass FROM runs r "
+        "JOIN communities c ON r.community_id = c.community_id"
+    ).fetchall()
 
-        high_rate = pass_rate(high_ids)
-        low_rate = pass_rate(low_ids)
+    def pass_rate(sample_ids: set[str]) -> float:
+        if not sample_ids:
+            return 0.0
+        matched = [r[1] for r in all_rows if r[0] in sample_ids]
+        if not matched:
+            return float("nan")
+        return sum(1 for v in matched if v) / len(matched)
+
+    high_rate = pass_rate(high_ids)
+    low_rate = pass_rate(low_ids)
 
     passed = high_rate > low_rate or math.isnan(high_rate)
     return {
@@ -157,18 +156,14 @@ def _check2_with_surrogate(
     builds feature vectors, runs predict_batch_with_gate(), and computes
     Spearman r between predicted flux and measured function.
     """
-    sample_ids = list(measured.keys())
-    placeholders = ",".join("?" * len(sample_ids))
-
-    with db._connect() as conn:
-        rows = conn.execute(
-            f"SELECT c.sample_id, c.phylum_profile, "
-            f"s.soil_ph, s.organic_matter_pct, s.clay_pct, s.temperature_c, s.precipitation_mm "
-            f"FROM communities c "
-            f"JOIN samples s ON c.sample_id = s.sample_id "
-            f"WHERE c.sample_id IN ({placeholders})",
-            sample_ids,
-        ).fetchall()
+    # Query all communities and filter in Python (avoids SQLite's 999-variable IN limit)
+    all_rows = db.conn.execute(
+        "SELECT c.sample_id, c.phylum_profile, "
+        "s.soil_ph, s.organic_matter_pct, s.clay_pct, s.temperature_c, s.precipitation_mm "
+        "FROM communities c "
+        "JOIN samples s ON c.sample_id = s.sample_id"
+    ).fetchall()
+    rows = [r for r in all_rows if r[0] in measured]
 
     if not rows:
         return {
@@ -219,12 +214,11 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
 
     Used as fallback when no surrogate model path is provided.
     """
-    with db._connect() as conn:
-        rows = conn.execute(
-            "SELECT c.sample_id, r.t025_nsti_mean, r.t025_n_pathways "
-            "FROM runs r JOIN communities c ON r.community_id = c.community_id "
-            "WHERE r.t025_n_pathways IS NOT NULL"
-        ).fetchall()
+    rows = db.conn.execute(
+        "SELECT c.sample_id, r.t025_nsti_mean, r.t025_n_pathways "
+        "FROM runs r JOIN communities c ON r.community_id = c.community_id "
+        "WHERE r.t025_n_pathways IS NOT NULL"
+    ).fetchall()
 
     # Use n_pathways as proxy for predicted function score
     paired = []
@@ -258,12 +252,11 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
 
 def _check3_t1_flux_magnitude(db: SoilDB, measured: dict[str, float]) -> dict:
     """Check 3: T1 predicted fluxes should be within 2 orders of magnitude of measured."""
-    with db._connect() as conn:
-        rows = conn.execute(
-            "SELECT c.sample_id, r.t1_target_flux FROM runs r "
-            "JOIN communities c ON r.community_id = c.community_id "
-            "WHERE r.t1_target_flux IS NOT NULL"
-        ).fetchall()
+    rows = db.conn.execute(
+        "SELECT c.sample_id, r.t1_target_flux FROM runs r "
+        "JOIN communities c ON r.community_id = c.community_id "
+        "WHERE r.t1_target_flux IS NOT NULL"
+    ).fetchall()
 
     within_2_orders = 0
     total_paired = 0
@@ -310,7 +303,7 @@ def validate(
 ):
     """Validate pipeline output against known reference communities."""
     logging.basicConfig(level=logging.INFO)
-    database = SoilDB(str(db))
+    database = SoilDB(str(db)).connect()
 
     measured = _load_measured_function(measured_function)
     logger.info("Loaded %d samples with measured function values", len(measured))
