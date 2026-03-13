@@ -153,16 +153,16 @@ class FunctionalPredictor:
 
         X_processed = clr_transform(X) if self._apply_clr else X
 
-        # Scale with the fitted scaler from the pipeline
-        scaler = self._model.named_steps["scaler"]
-        estimator = self._model.named_steps["est"]
-        X_scaled = scaler.transform(X_processed)
-
-        point_estimate = float(estimator.predict(X_scaled)[0])
+        # Use pipeline.predict() directly — handles any step names robustly
+        point_estimate = float(self._model.predict(X_processed)[0])
 
         # Uncertainty via tree ensemble variance (RF only)
+        # Access the last pipeline step regardless of its name
+        estimator = list(self._model.named_steps.values())[-1]
         uncertainty = 0.0
-        if self.model_type == "random_forest" and hasattr(estimator, "estimators_"):
+        if hasattr(estimator, "estimators_"):
+            scaler = self._model.named_steps.get("scaler")
+            X_scaled = scaler.transform(X_processed) if scaler else X_processed
             tree_preds = np.array([
                 tree.predict(X_scaled)[0] for tree in estimator.estimators_
             ])
@@ -237,12 +237,19 @@ class FunctionalPredictor:
         X = np.asarray(X, dtype=float)
         X_processed = clr_transform(X) if self._apply_clr else X
 
-        scaler = self._model.named_steps["scaler"]
-        estimator = self._model.named_steps["est"]
-        X_scaled = scaler.transform(X_processed)
+        # Use pipeline.predict() directly — handles any step names robustly.
+        # If the model is a classifier, use predict_proba()[:,1] for continuous scores
+        # (better Spearman correlation than binary class labels for rank-order validation).
+        estimator = list(self._model.named_steps.values())[-1]
+        if hasattr(estimator, "predict_proba") and not hasattr(estimator, "n_outputs_"):
+            # Classifier — use probability of positive class as continuous score
+            predictions = self._model.predict_proba(X_processed)[:, 1]
+        else:
+            predictions = self._model.predict(X_processed)
 
-        predictions = estimator.predict(X_scaled)
-        if self.model_type == "random_forest" and hasattr(estimator, "estimators_"):
+        if hasattr(estimator, "estimators_"):
+            scaler = self._model.named_steps.get("scaler")
+            X_scaled = scaler.transform(X_processed) if scaler else X_processed
             tree_matrix = np.vstack([t.predict(X_scaled) for t in estimator.estimators_])
             uncertainties = tree_matrix.std(axis=0)
         else:
@@ -302,7 +309,7 @@ class FunctionalPredictor:
         """Return feature importance dict {feature_name: importance}."""
         if self._model is None:
             return {}
-        estimator = self._model.named_steps["est"]
+        estimator = list(self._model.named_steps.values())[-1]
         if not hasattr(estimator, "feature_importances_"):
             return {}
         importances = estimator.feature_importances_
