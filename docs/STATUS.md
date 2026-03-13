@@ -2,12 +2,14 @@
 
 ## Validation Summary
 
-| Version | Model | Spearman r | Check 2 | Check 3 | Overall |
-|---|---|---|---|---|---|
-| v1 (synthetic) | bnf_surrogate_classifier.joblib | 0.35 | FAIL | FAIL | FAIL |
-| v2 (real labels) | bnf_surrogate_classifier_v2.joblib | **0.87** | **PASS** | **PASS** | PASS* |
+| Version | Metric | Value | Honest? | Notes |
+|---|---|---|---|---|
+| v1 | In-dist Spearman r | 0.35 | No | Synthetic circular labels |
+| v2 | In-dist Spearman r | **0.87** | **No** | Label leakage (same site labels in train+test) |
+| v2 | CV R² (5-fold) | **0.448** | Partial | Same-site samples can appear in both folds |
+| v2 | **LOSO Spearman r** | **0.155** | **YES** | Leave-site-out CV — fully independent (n=47 sites) |
 
-\* Check 1 (T0 pass rate) redesigned as informational — see below.
+**Current honest external performance: LOSO r = 0.155** (barely above chance for unseen sites).
 
 ---
 

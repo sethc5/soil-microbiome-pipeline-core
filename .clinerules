@@ -47,6 +47,12 @@ Whenever you commit local changes:
 For long-running server tasks, always use `nohup ... &` and log to `/tmp/<taskname>.log`.
 Check progress with `tail -f /tmp/<taskname>.log`.
 
+**Before launching any new background job**, check for existing instances:
+```bash
+pgrep -fa <script_name>.py
+```
+Never launch a duplicate job — it will fight for DB access and waste CPU.
+
 ---
 
 ## RULE 4 — Science Standards
@@ -63,11 +69,68 @@ This project must maintain scientific integrity:
   accompanying JSON that states: training data source, n_samples, CV metric,
   and known limitations.
 - **Spearman r is the primary validation metric** for rank-order screening.
-  Current baseline: r=0.35 (synthetic labels). Target: r≥0.60 (real labels).
+
+### Current honest performance numbers (as of 2026-03-12):
+
+| Metric | Value | Honest? |
+|---|---|---|
+| LOSO Spearman r (v2 model) | **0.155** | YES — cite this |
+| 5-fold CV R² (v2 model) | 0.448 | Partial (same-site leakage possible) |
+| In-dist Spearman r (v2 model) | 0.87 | NO — label leakage, do not cite |
+
+**NEVER claim r=0.87 as the pipeline's performance.** The honest number is
+LOSO r=0.155. The gap (0.87 vs 0.155) is entirely label leakage from site-level
+labels. The path to improvement is: more labelled sites + nifH gene features.
 
 ---
 
-## RULE 5 — Project Context Summary
+## RULE 5 — Honest Status Check
+
+Before making any claim about pipeline performance or production readiness:
+1. Read `docs/STATUS.md` for current validated metrics
+2. The pipeline is **NOT production-ready** until LOSO r ≥ 0.45
+3. Current state: LOSO r=0.155 — research prototype only
+4. Do not overstate confidence. "Shows preliminary signal" not "predicts BNF"
+
+---
+
+## RULE 6 — Model Versioning
+
+When retraining models:
+- Always increment suffix: `*_v2.joblib` → `*_v3.joblib`
+- Never overwrite an existing versioned model file
+- Write a companion `*_report.json` with: n_samples, CV metrics, label source, limitations
+- Add to `apps/bnf/models/*.joblib` in `.gitignore` — models are too large for git
+
+---
+
+## RULE 7 — Database Safety
+
+The production database at `/data/pipeline/db/soil_microbiome.db` contains
+237,567 ingested samples. It is not backed up automatically.
+
+- **Never run DROP TABLE, ALTER TABLE, or DELETE** on the production DB without
+  first creating a backup: `cp /data/pipeline/db/soil_microbiome.db /data/pipeline/db/soil_microbiome.db.bak`
+- Schema changes must be tested locally first
+- Queries that read the full table (SELECT * FROM communities) will be slow;
+  always add LIMIT during development
+
+---
+
+## RULE 8 — Context Window Discipline
+
+When context usage reaches **≥85%**:
+- Stop starting new major analysis tasks
+- Commit all in-progress work
+- Run `bash scripts/ops/check_sync.sh` to confirm sync
+- Use `attempt_completion` to close the session
+- The next session will start fresh with full context
+
+This prevents half-finished work from being cut off mid-implementation.
+
+---
+
+## RULE 9 — Project Context Summary
 
 **What this is:** A soil microbiome analysis pipeline that screens communities
 for biological nitrogen fixation (BNF) potential — relevant to reducing synthetic
@@ -81,11 +144,16 @@ fertilizer dependence (urea shortage context).
 - `tests/` — test suite
 
 **Current state (as of 2026-03-12):**
-- 237,567 NEON samples ingested
-- External validation: Spearman r=0.35 (synthetic labels) → target r≥0.60
-- Retrain on real published labels in progress (`apps/bnf/models/*_v2.joblib`)
-- PICRUSt2 installed on server, not yet run at scale
+- 237,567 NEON samples ingested (47 sites)
+- **LOSO r=0.155** — honest cross-site performance (NOT publishable yet)
+- CV R²=0.448 for v2 model (partial label leakage from same-site 5-fold CV)
+- pH enrichment: no phyla consistently enriched in high-BNF communities at
+  phylum level — need nifH gene features from PICRUSt2
+- PICRUSt2 installed on server, not yet run at scale (key next step)
 - AGORA2 metabolic models not yet integrated
 
+**Next priority:** Run PICRUSt2 on 237K samples to get nifH pathway abundance,
+add as feature to RF model, re-run LOSO. Target: LOSO r ≥ 0.45.
+
 **Do not:** invent biological assumptions, claim production-readiness before
-validation passes, or skip the git sync check.
+LOSO r ≥ 0.45, or skip the git sync check.
