@@ -262,6 +262,67 @@ PUBLISHED_BNF_RATES: dict[str, dict] = {
         "source": "Vitousek et al. 2013 (tundra 1–5 kg N ha-1 yr-1, symbiotic + cyanobacterial mats)",
         "notes": "Tundra biomes — high BNF per area from cyanobacterial crusts and Dryas symbioses.",
     },
+    # Additional NEON sites (added after first run identified unmapped sites)
+    "BARR": {
+        "bnf_kg_N_ha_yr": 2.8,
+        "biome": "arctic_tundra",
+        "source": "Vitousek et al. 2013 (tundra 1–5 kg N ha-1 yr-1); DeLuca et al. 2002 (cyanobacterial mats)",
+        "notes": "Utqiaġvik (Barrow), AK. Arctic tundra — cyanobacterial mats and moss-associated BNF, elevated rates.",
+    },
+    "NIWO": {
+        "bnf_kg_N_ha_yr": 1.2,
+        "biome": "alpine_tundra",
+        "source": "Vitousek et al. 2013; Reed et al. 2011 (alpine tundra 0.5–2.5 kg N ha-1 yr-1)",
+        "notes": "Niwot Ridge, CO. Alpine tundra, cryptogam-dominated BNF.",
+    },
+    "RMNP": {
+        "bnf_kg_N_ha_yr": 1.0,
+        "biome": "subalpine_forest",
+        "source": "Vitousek et al. 2013; Reed et al. 2011",
+        "notes": "Rocky Mountain National Park, CO. Subalpine conifer + alpine tundra.",
+    },
+    "GRSM": {
+        "bnf_kg_N_ha_yr": 1.3,
+        "biome": "temperate_deciduous_forest",
+        "source": "Vitousek et al. 2013 (temperate deciduous 0.5–2 kg N ha-1 yr-1)",
+        "notes": "Great Smoky Mountains, TN/NC. High-elevation Appalachian deciduous/coniferous.",
+    },
+    "ORNL": {
+        "bnf_kg_N_ha_yr": 1.1,
+        "biome": "temperate_deciduous_forest",
+        "source": "Vitousek et al. 2013; Boring et al. 1988 (Walker Branch BNF data)",
+        "notes": "Oak Ridge National Lab, TN. Mixed hardwood, long-term watershed research.",
+    },
+    "OAES": {
+        "bnf_kg_N_ha_yr": 1.4,
+        "biome": "tallgrass_prairie",
+        "source": "Smercina et al. 2019 (tallgrass prairie 0.8–2.4 kg N ha-1 yr-1)",
+        "notes": "Klemme Range Research Station, OK. Tallgrass/mixed-grass prairie.",
+    },
+    "DSNY": {
+        "bnf_kg_N_ha_yr": 2.2,
+        "biome": "subtropical_wetland",
+        "source": "Reed et al. 2011 (freshwater wetland 2–8 kg N ha-1 yr-1); Inglett et al. 2011",
+        "notes": "Disney Wilderness Preserve, FL. Subtropical prairie with seasonal wetlands.",
+    },
+    "DELA": {
+        "bnf_kg_N_ha_yr": 1.8,
+        "biome": "bottomland_hardwood",
+        "source": "Reed et al. 2011 (floodplain forest BNF elevated by soil moisture)",
+        "notes": "Dead Lake, AL/FL border. Bottomland hardwood, floodplain BNF.",
+    },
+    "LENO": {
+        "bnf_kg_N_ha_yr": 1.6,
+        "biome": "bottomland_hardwood",
+        "source": "Reed et al. 2011",
+        "notes": "Lenoir Landing, AL. Bottomland hardwood forest, riparian BNF.",
+    },
+    "SJER": {
+        "bnf_kg_N_ha_yr": 0.8,
+        "biome": "annual_grassland",
+        "source": "Smercina et al. 2019 (annual grassland/shrubland 0.3–1.5 kg N ha-1 yr-1)",
+        "notes": "San Joaquin Experimental Range, CA. Annual grassland, Mediterranean climate.",
+    },
     # Wetlands
     "HOPB": {
         "bnf_kg_N_ha_yr": 3.5,
