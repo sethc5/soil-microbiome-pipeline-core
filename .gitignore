@@ -26,6 +26,10 @@ models/*
 !models/README.md
 !models/agora2/MANIFEST.tsv
 
+# BNF app model binaries — too large for git (v2 models are 1.6–2.1 GB each)
+# Models are generated on the server by apps/bnf/scripts/retrain_bnf_surrogate.py
+apps/bnf/models/*.joblib
+
 # Reference data (curated, not checked in)
 reference/*.biom
 reference/*.csv
