@@ -88,9 +88,17 @@ labels. The path to improvement is: more labelled sites + nifH gene features.
 
 Before making any claim about pipeline performance or production readiness:
 1. Read `docs/STATUS.md` for current validated metrics
-2. The pipeline is **NOT production-ready** until LOSO r ≥ 0.45
-3. Current state: LOSO r=0.155 — research prototype only
-4. Do not overstate confidence. "Shows preliminary signal" not "predicts BNF"
+2. Read `docs/GROUND_TRUTH_progress.md` for full project context (what works + why)
+3. Read `docs/GROUND_TRUTH_pitfalls.md` for anti-patterns to avoid (8 documented mistakes)
+4. The pipeline is **NOT production-ready** until LOSO r ≥ 0.45
+5. Current state: LOSO r=0.155 — research prototype only
+6. Do not overstate confidence. "Shows preliminary signal" not "predicts BNF"
+
+**When significant work is done in a session** (new validated metric, new pitfall discovered,
+architecture change), update the relevant GROUND_TRUTH doc before closing:
+- New LOSO r or CV metric → update GROUND_TRUTH_progress.md model table + STATUS.md
+- New pitfall hit → add entry to GROUND_TRUTH_pitfalls.md summary table
+- New component built → add to GROUND_TRUTH_progress.md "What Has Been Built"
 
 ---
 
