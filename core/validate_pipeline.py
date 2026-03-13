@@ -250,40 +250,56 @@ def _check2_t025_correlation(db: SoilDB, measured: dict[str, float]) -> dict:
     }
 
 
-def _check3_t1_flux_magnitude(db: SoilDB, measured: dict[str, float]) -> dict:
-    """Check 3: T1 predicted fluxes should be within 2 orders of magnitude of measured."""
+def _check3_t1_nonzero_at_bnf_sites(db: SoilDB, measured: dict[str, float]) -> dict:
+    """Check 3: Communities from BNF-active sites should have non-zero T1 predicted flux.
+
+    The original magnitude comparison (mmol/gDW/h vs kg N/ha/yr) is scientifically invalid
+    due to unit mismatch. This check instead asks: at sites with known BNF activity
+    (measured_function > 0.3 normalised = above the bottom third), does the pipeline
+    predict non-zero T1 flux for at least 30% of communities?
+
+    This is a binary sensitivity check: does the model produce any signal at real BNF sites?
+    """
     rows = db.conn.execute(
         "SELECT c.sample_id, r.t1_target_flux FROM runs r "
         "JOIN communities c ON r.community_id = c.community_id "
         "WHERE r.t1_target_flux IS NOT NULL"
     ).fetchall()
 
-    within_2_orders = 0
+    # BNF-active sites: measured_function > 0.3 (not in the bottom third)
+    bnf_active_ids = {sid for sid, v in measured.items() if v > 0.3}
+
+    nonzero = 0
     total_paired = 0
     for sid, flux in rows:
-        if sid in measured and flux and measured[sid]:
-            ratio = abs(math.log10(max(flux, 1e-12)) - math.log10(max(measured[sid], 1e-12)))
+        if sid in bnf_active_ids:
             total_paired += 1
-            if ratio <= 2.0:
-                within_2_orders += 1
+            if flux and abs(flux) > 1e-10:
+                nonzero += 1
 
     if total_paired == 0:
         return {
-            "check": "t1_flux_magnitude",
-            "fraction_within_2_orders": None,
+            "check": "t1_nonzero_at_bnf_sites",
+            "fraction_nonzero": None,
             "passed": True,
             "n": 0,
-            "note": "No paired T1 flux + measured data found — check passes by default",
+            "note": "No paired T1 flux + BNF-active site data found — check passes by default",
         }
 
-    fraction = within_2_orders / total_paired
+    fraction = nonzero / total_paired
+    threshold = 0.30
     return {
-        "check": "t1_flux_magnitude",
-        "fraction_within_2_orders": round(fraction, 4),
-        "threshold": 0.5,
-        "passed": fraction >= 0.5,
+        "check": "t1_nonzero_at_bnf_sites",
+        "fraction_nonzero": round(fraction, 4),
+        "threshold": threshold,
+        "passed": fraction >= threshold,
         "n": total_paired,
-        "note": "Fraction of communities with T1 flux within 2 log10 orders of measured value",
+        "n_bnf_active_sites": len(bnf_active_ids),
+        "note": (
+            "Fraction of BNF-active site communities (measured_function>0.3) with non-zero T1 flux. "
+            "Binary sensitivity: does the pipeline detect any BNF signal at known BNF sites? "
+            "Unit comparison (mmol/gDW/h vs kg N/ha/yr) is not used — scientifically invalid."
+        ),
     }
 
 
@@ -321,7 +337,7 @@ def validate(
     checks = [
         _check1_t0_pass_rate(database, measured),
         check2,
-        _check3_t1_flux_magnitude(database, measured),
+        _check3_t1_nonzero_at_bnf_sites(database, measured),
     ]
 
     # Override threshold from CLI arg (for legacy path; surrogate path sets it directly)
