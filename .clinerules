@@ -1,0 +1,91 @@
+# Cline Project Rules — soil-microbiome-pipeline-core
+# These rules are enforced automatically at the start of every Cline session.
+
+## RULE 1 — Git Sync Check (MANDATORY FIRST STEP)
+
+**Before doing ANY work on this project, run the sync check:**
+
+```bash
+bash scripts/ops/check_sync.sh
+```
+
+This verifies that local, GitHub (origin/main), and the Hetzner server
+(`deploy@144.76.222.125:/opt/pipeline`) are all at the same commit.
+
+**If drift is detected:**
+- The script prints exactly what is out of sync and the fix command
+- Resolve the drift BEFORE making any changes
+- Do not skip this check — the session history shows that local/server drift
+  has caused lost work and wasted debugging time
+
+**If SSH is unreachable (offline/no VPN):**
+```bash
+bash scripts/ops/check_sync.sh --no-ssh
+```
+
+---
+
+## RULE 2 — Push Protocol
+
+Whenever you commit local changes:
+1. `git push origin main` immediately after every commit
+2. Then SSH to server and `git pull` so all three stay in sync
+3. Never accumulate multiple unsynced commits across sessions
+
+---
+
+## RULE 3 — Server SSH Context
+
+- Server: `deploy@144.76.222.125`
+- SSH key: `~/.ssh/id_ed25519_personal`
+- Pipeline path: `/opt/pipeline`
+- Python env: `/opt/pipeline/.venv/bin/python`
+- Database: `/data/pipeline/db/soil_microbiome.db`
+- CPU-only server (Hetzner AX102, Intel Xeon W-2295, 18 cores/36 threads, 252 GB RAM)
+  — no GPU, no CUDA. All ML must use CPU-compatible libraries.
+
+For long-running server tasks, always use `nohup ... &` and log to `/tmp/<taskname>.log`.
+Check progress with `tail -f /tmp/<taskname>.log`.
+
+---
+
+## RULE 4 — Science Standards
+
+This project must maintain scientific integrity:
+
+- **No circular validation** — never use pipeline-predicted labels as ground truth
+  for validating the same pipeline. Use published literature values only.
+- **Cite sources** — every published rate, threshold, or biological assumption must
+  reference a specific paper (author, year, DOI if possible).
+- **Unit honesty** — mmol/gDW/h (FBA flux) ≠ kg N/ha/yr (ecosystem rate).
+  Never compare these directly. State unit conversions explicitly.
+- **Document model limitations** — trained models must have a docstring or
+  accompanying JSON that states: training data source, n_samples, CV metric,
+  and known limitations.
+- **Spearman r is the primary validation metric** for rank-order screening.
+  Current baseline: r=0.35 (synthetic labels). Target: r≥0.60 (real labels).
+
+---
+
+## RULE 5 — Project Context Summary
+
+**What this is:** A soil microbiome analysis pipeline that screens communities
+for biological nitrogen fixation (BNF) potential — relevant to reducing synthetic
+fertilizer dependence (urea shortage context).
+
+**Architecture:**
+- `core/` — DB, adapters, compute, analysis modules
+- `apps/bnf/` — BNF-specific models, scripts, reference data
+- `scripts/ingest/` — data ingestion from NEON, MGnify, SRA
+- `scripts/ops/` — operational scripts (sync check, batch runner, etc.)
+- `tests/` — test suite
+
+**Current state (as of 2026-03-12):**
+- 237,567 NEON samples ingested
+- External validation: Spearman r=0.35 (synthetic labels) → target r≥0.60
+- Retrain on real published labels in progress (`apps/bnf/models/*_v2.joblib`)
+- PICRUSt2 installed on server, not yet run at scale
+- AGORA2 metabolic models not yet integrated
+
+**Do not:** invent biological assumptions, claim production-readiness before
+validation passes, or skip the git sync check.
