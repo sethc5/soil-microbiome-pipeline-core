@@ -70,7 +70,7 @@ This project must maintain scientific integrity:
   and known limitations.
 - **Spearman r is the primary validation metric** for rank-order screening.
 
-### Current honest performance numbers (as of 2026-03-12):
+### Current honest performance numbers (as of 2026-03-13):
 
 | Metric | Value | Honest? |
 |---|---|---|
@@ -151,17 +151,18 @@ fertilizer dependence (urea shortage context).
 - `scripts/ops/` — operational scripts (sync check, batch runner, etc.)
 - `tests/` — test suite
 
-**Current state (as of 2026-03-12):**
+**Current state (as of 2026-03-13):**
 - 237,567 NEON samples ingested (47 sites)
 - **LOSO r=0.155** — honest cross-site performance (NOT publishable yet)
 - CV R²=0.448 for v2 model (partial label leakage from same-site 5-fold CV)
-- pH enrichment: no phyla consistently enriched in high-BNF communities at
-  phylum level — need nifH gene features from PICRUSt2
-- PICRUSt2 installed on server, not yet run at scale (key next step)
+- pH enrichment complete: no phyla enriched in ≥2 pH bins (phylum-level too coarse)
+- PICRUSt2 installed on server; ASV/BIOM gap documented (`docs/picrust2_gap_analysis.md`)
 - AGORA2 metabolic models not yet integrated
 
-**Next priority:** Run PICRUSt2 on 237K samples to get nifH pathway abundance,
-add as feature to RF model, re-run LOSO. Target: LOSO r ≥ 0.45.
+**Next priority:** (1) More labelled sites — highest ROI for LOSO r improvement.
+(2) Genus-level features — top_genera in DB, not yet used in RF.
+(3) PICRUSt2 nifH feature — requires fixing ASV data gap first.
+Target: LOSO r ≥ 0.45.
 
 **Do not:** invent biological assumptions, claim production-readiness before
 LOSO r ≥ 0.45, or skip the git sync check.

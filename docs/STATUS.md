@@ -1,4 +1,4 @@
-# Pipeline Status — 2026-03-12
+# Pipeline Status — 2026-03-13
 
 ## Validation Summary
 
@@ -95,30 +95,28 @@ predicted flux. The T1 FBA model produces signal where we expect it.
 | Published BNF reference rates | ✅ 45/47 NEON sites mapped (3 sources) |
 | RF surrogate v1 (synthetic labels) | ⚠️ r=0.35 — do not use for production |
 | RF surrogate v2 (real labels) | ✅ CV ROC-AUC=0.807, CV R²=0.448 |
-| Label leakage in validation | ⚠️ Known — leave-site-out CV is TODO |
+| Label leakage in validation | ✅ LOSO CV complete — r=0.155 (47 sites, 2026-03-12) |
 | T1 FBA model | ✅ Produces signal at BNF sites (91.2% non-zero) |
 | PICRUSt2 | ⬜ Installed on server, not yet run at scale |
 | AGORA2 metabolic models | ⬜ Not yet integrated |
 
 ---
 
+## Completed Steps (2026-03-12 session)
+
+1. ✅ **LOSO CV** — `apps/bnf/scripts/loso_cv_bnf_surrogate.py` — r=0.155, 47 sites, 474s
+2. ✅ **pH-stratified enrichment** — `apps/bnf/scripts/ph_stratified_enrichment.py` — no phyla enriched in ≥2 pH bins (phylum-level 16S insufficient; need genus/nifH features)
+
 ## Next Steps
 
-**Immediate (high impact, low cost):**
+**High ROI (binding constraint = n_labelled_sites, not features):**
 
-1. **Leave-site-out CV** — `apps/bnf/scripts/loso_cv_bnf_surrogate.py`  
-   Hold out one NEON site at a time, train on remaining 44, predict held-out.
-   This gives the honest independent Spearman r estimate.
-   Expected: r ≈ 0.55–0.67 (CV R²=0.448 → r≈0.67 for random splits).
+1. **Extend labelled sites** — search literature for BNF rates at more NEON sites or co-located datasets (LTREB, AmeriFlux, NutNet). Each additional labelled site adds 1 LOSO training/test datum. See `scripts/ingest/fetch_published_bnf.py`.
 
-2. **Run PICRUSt2 at scale** — `scripts/ingest/process_neon_16s.py`  
-   237K 16S samples → functional gene predictions → nifH pathway enrichment.
-   This supplements the RF surrogate with mechanistic evidence.
+2. **nifH feature via PICRUSt2** — requires ASV-level data (vsearch hits.uc discarded; see `docs/picrust2_gap_analysis.md`). Options: modify `process_neon_16s.py` to save OTU counts, or re-run on subset.
 
-3. **pH-stratified enrichment** — `core/analysis/taxa_enrichment.py`  
-   Identify which taxa are enriched at high-BNF sites within pH bins,
-   controlling for the strongest confound.
+3. **Genus-level features** — current features are phylum-level (too coarse for BNF). Genus-level top_genera data is in DB — train v3 with genus features included.
 
 **Medium term:**
-- AGORA2 metabolic model integration (docs/agora2_integration_plan.md)
-- MGnify metagenome data ingestion (scripts/ingest/ingest_mgnify.py)
+- AGORA2 metabolic model integration (`docs/agora2_integration_plan.md`)
+- MGnify metagenome data ingestion (`scripts/ingest/ingest_mgnify.py`)
