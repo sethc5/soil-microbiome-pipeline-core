@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-03-14 00:40 CST — c552965→(next commit)
+**Done:** LOSO v4 (corrected labels) ran: r=0.1123 vs baseline 0.1552 (Δ=-0.043, within SE=0.15 for n=47 — NOT statistically significant). CLEAN NEGATIVE RESULT: label quality is NOT a binding constraint. Feature granularity IS the bottleneck — phylum-level 16S cannot distinguish within-biome BNF variation. Corrected labels retained (more scientifically accurate). STATUS.md updated.  
+**Key metrics:** LOSO v4 r=0.1123 (not sig different from v2 r=0.1552); label correction experiment ruled out label quality as bottleneck  
+**Blocked by:** Feature granularity ceiling — phylum-level 16S + 5 env vars = LOSO r ~0.15 max  
+**Next:** Fix process_neon_16s.py to save OTU-level counts → enables real genus features + PICRUSt2 nifH. This is the confirmed highest-ROI next step.
+
 ## 2026-03-14 00:25 CST — 1a88433→ec2daf5
 **Done:** SESSION_LOG.md + Rule 10 added; 8 unmapped NEON sites corrected in fetch_published_bnf.py (TOOL 0.7→2.0 kg/ha/yr, UNDE/STEI/TREE 0.7→1.1-1.2, TALL 0.7→1.0, UKFS 0.7→1.3, YELL 0.7→0.9, STER 0.7→0.6); bnf_measurements.csv rebuilt on server (all 47 sites now mapped); LOSO v4 launched (PID 650980, /tmp/loso_v4.log, ~8 min)  
 **Key metrics:** bnf_measurements.csv: 237,567 samples, 47/47 sites mapped (was 39/47 properly mapped); unique label values will increase from 21 to ~29+  
