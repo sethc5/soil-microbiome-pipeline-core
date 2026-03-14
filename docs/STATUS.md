@@ -102,20 +102,52 @@ predicted flux. The T1 FBA model produces signal where we expect it.
 
 ---
 
-## Completed Steps (2026-03-12 session)
+## Completed Steps (2026-03-12 to 2026-03-14)
 
-1. ✅ **LOSO CV** — `apps/bnf/scripts/loso_cv_bnf_surrogate.py` — r=0.155, 47 sites, 474s
-2. ✅ **pH-stratified enrichment** — `apps/bnf/scripts/ph_stratified_enrichment.py` — no phyla enriched in ≥2 pH bins (phylum-level 16S insufficient; need genus/nifH features)
+1. ✅ **LOSO CV (v2)** — `apps/bnf/scripts/loso_cv_bnf_surrogate.py` — r=0.1552, 47 sites, 474s (2026-03-12)
+2. ✅ **pH-stratified enrichment** — no phyla enriched in ≥2 pH bins — phylum-level 16S too coarse (2026-03-12)
+3. ✅ **RF v3 training** — `apps/bnf/scripts/retrain_bnf_surrogate_v3.py` — CV R²=0.462 (≈v2 0.448), confirms feature engineering not bottleneck (2026-03-13)
+4. ✅ **top_genera provenance investigation** — 26 BNF-curated genera, likely FBA-derived not real 16S; excluded from v3 (2026-03-13 — Pitfall #9)
+5. ✅ **LOSO per-site analysis** — spearman_r field added to loso_report.json; label quality bottleneck identified (2026-03-14)
+
+## LOSO Per-Site Analysis (2026-03-14)
+
+**Confirmed LOSO r = 0.1552** (recomputed from per_site data — was missing from JSON, now fixed).
+
+**Label quality bottleneck discovered:**
+- 47 NEON sites → only 21 unique published BNF rates (biome-averaged from Smercina/Vitousek/Reed)
+- 11 sites share rate=0.085 (different biomes: WI forest, CO prairie, AK boreal, NC forest, ND prairie — all given the same label)
+- Within-label noise degrades LOSO r independently of n_labelled_sites
+
+**Largest prediction errors:**
+
+| Site | Predicted | Published | Error | Interpretation |
+|---|---|---|---|---|
+| HEAL | 0.608 | 0.106 | +0.50 | Over-predicted: model sees boreal env conditions as high-BNF |
+| GRSM | 0.683 | 0.213 | +0.47 | Over-predicted: Great Smoky Mtns temperate forest |
+| GUAN | 0.351 | 0.809 | -0.46 | Under-predicted: Puerto Rico tropical (truly high-BNF) |
+| PUUM | 0.546 | 1.000 | -0.45 | Under-predicted: Hawaii (highest-BNF in dataset) |
+| BARR | 0.255 | 0.532 | -0.28 | Under-predicted: Arctic tundra (cyanobacterial mat BNF) |
+
+**Pattern:** Model correctly identifies desert=low, but can't distinguish high-organic-matter
+temperate sites (HEAL, GRSM) from truly high-BNF tropical sites (GUAN, PUUM).
+This suggests both label quality AND feature granularity are bottlenecks.
 
 ## Next Steps
 
-**High ROI (binding constraint = n_labelled_sites, not features):**
+**Confirmed binding constraints (in order of impact):**
 
-1. **Extend labelled sites** — search literature for BNF rates at more NEON sites or co-located datasets (LTREB, AmeriFlux, NutNet). Each additional labelled site adds 1 LOSO training/test datum. See `scripts/ingest/fetch_published_bnf.py`.
+1. **Label quality** — biome-averaged labels (21 unique values / 47 sites) create within-label noise. Need site-specific BNF measurements, not biome averages. Priority search: papers with DIRECT NEON site measurements (ARA or 15N dilution).
 
-2. **nifH feature via PICRUSt2** — requires ASV-level data (vsearch hits.uc discarded; see `docs/picrust2_gap_analysis.md`). Options: modify `process_neon_16s.py` to save OTU counts, or re-run on subset.
+2. **Label quantity** — n_labelled_sites=47. Each new distinct site with a direct measurement adds 1 independent LOSO datum. Target: ≥60 sites.
 
-3. **Genus-level features** — current features are phylum-level (too coarse for BNF). Genus-level top_genera data is in DB — train v3 with genus features included.
+3. **Feature granularity** — phylum-level features can't distinguish HEAL boreal from GUAN tropical. nifH gene abundance (PICRUSt2) or genus-level real 16S would help (note: top_genera in DB is likely FBA-derived — see Pitfall #9).
+
+**Specific next actions:**
+
+- Literature search: ARA measurements at NEON sites (not just biome ranges) — start with GUAN, PUUM, BARR since those are the biggest misses
+- NEON data portal: NEON publishes soil biogeochemistry — check if any BNF-proxy data exists
+- Process_neon_16s.py fix: save OTU counts alongside phylum profiles → enables real genus features + PICRUSt2
 
 **Medium term:**
 - AGORA2 metabolic model integration (`docs/agora2_integration_plan.md`)
