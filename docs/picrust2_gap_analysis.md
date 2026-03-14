@@ -1,74 +1,109 @@
-# PICRUSt2 Gap Analysis — 2026-03-12
+# PICRUSt2 Gap Analysis — updated 2026-03-14
 
-## The Problem
+## Status: UNBLOCKED (pending 237K backfill completion)
 
-`core/compute/picrust2_runner.py` requires:
-1. `asv_table_biom` — per-ASV count table (BIOM format)
-2. `rep_seqs_fasta` — representative 16S sequences for each ASV (FASTA)
+The original blocker (ASV data discarded after classification) was resolved by
+the Pitfall #4 fix in commit `c8d9fc8`. The `otu_profile` column now stores
+`{NR_accession: read_count}` for every processed sample.
 
-`scripts/ingest/process_neon_16s.py` produces only:
-- `phylum_profile` — aggregated phylum-level relative abundances (stored in DB)
-- `top_genera` — aggregated genus-level relative abundances (stored in DB)
-
-**ASV-level data is discarded** after vsearch classification. PICRUSt2 cannot
-run from phylum percentages — it needs the actual sequence counts per ASV.
-
-## What Needs to Happen (Next Session)
-
-### Option A — Check if NEON BIOM files exist on server
-NEON data portal provides pre-processed BIOM files alongside raw FASTQs.
-If `ingest_neon_biom.py` downloaded them, they may still be in staging.
-
+**Backfill running:** 237K samples, PID 658581, `/tmp/otu_backfill_full.log`.
+ETA: 22-30 hours from 2026-03-14 10:02 CST. Check with:
 ```bash
 ssh -i ~/.ssh/id_ed25519_personal deploy@144.76.222.125 \
-  'find /data/pipeline/staging -name "*.biom" -o -name "*.biom.gz" | head -20'
+  'tail -5 /tmp/otu_backfill_full.log && \
+   python3 -c "
+import sqlite3
+conn=sqlite3.connect(\"/data/pipeline/db/soil_microbiome.db\")
+n=conn.execute(\"SELECT COUNT(*) FROM communities WHERE otu_profile IS NOT NULL AND otu_profile != \"{}\"\").fetchone()[0]
+print(f\"Samples with otu_profile: {n}\")
+"'
 ```
 
-If BIOM files exist:
-1. Run PICRUSt2 on the BIOM files (one per NEON site collection event)
-2. Extract nifH pathway (KEGG K00531 / MetaCyc PWY-5345) per sample
-3. Write nifH abundance to `runs.t025_nifh_abundance` in DB
-4. Retrain RF v3 with nifH as 65th feature
-5. Re-run LOSO CV (target r ≥ 0.45 with nifH)
+---
 
-### Option B — Re-process with ASV-saving pipeline
-If BIOM files are gone, `process_neon_16s.py` needs to be modified to:
-1. Save ASV-level UC output (not just aggregated profiles)
-2. Write a per-sample BIOM file to staging
-3. Then chain PICRUSt2 on each BIOM
+## Confirmed Compatibility Path
 
-This would require re-processing ~237K samples (same vsearch step, just different
-output format). Runtime: similar to original ingestion run.
+**Our accession format:** `NR_134097.1` (NCBI RefSeq RNA)  
+**PICRUSt2 internal format:** IMG assembly IDs (`2040502012`, `2140918011`, ...)  
+→ **NR_ IDs are NOT directly compatible with PICRUSt2's prebuilt marker tables.**
 
-### Option C — NEON BIOM download
-NEON API provides processed amplicon BIOM files directly. Endpoint:
-  `https://data.neonscience.org/api/v0/data/DP1.10081.001/{site}/{date}`
+### Required path: `place_seqs.py` (open-reference placement)
 
-These are DADA2-processed ASV tables — exactly what PICRUSt2 needs.
-`scripts/ingest/ingest_neon_biom.py` already handles this — it may need
-to be run again if BIOMs weren't kept.
+PICRUSt2 has a reference tree at:
+`/home/deploy/miniforge3/envs/picrust2/lib/python3.12/site-packages/picrust2/default_files/prokaryotic/pro_ref/`
+  - `pro_ref.fna` — reference 16S sequences
+  - `pro_ref.tre` — reference phylogeny (RAxML)
+  - `pro_ref.hmm` — HMM profile for alignment
 
-## nifH Feature Plan
+Our `16S_ref.fasta` (27,277 NCBI 16S sequences) contains the actual sequences
+for each NR_ accession. `place_seqs.py` accepts FASTA → places on `pro_ref.tre`.
 
-Once PICRUSt2 is run:
-- KEGG pathway K00531 (nitrogenase Mo-Fe protein alpha chain) = nifH proxy
-- Or MetaCyc PWY-5345 (nitrogen fixation I)
-- Add as feature: `runs.t025_nifh_pathway_abundance` (float, nullable)
-- In retrain script: add nifH abundance alongside phyla + env features
-- Expected: LOSO r increases from 0.155 toward 0.45+
-
-## Key Check for Next Session
+**Confirmed workflow:**
 
 ```bash
-# 1. Check sync first
-bash scripts/ops/check_sync.sh
+# 1. Extract unique NR_ sequences from 16S_ref.fasta
+# (needed once — amortized across all 237K samples)
+python3 /opt/pipeline/apps/bnf/scripts/run_picrust2.py --extract-refs \
+  --ref /data/pipeline/ref/16S_ref.fasta \
+  --db /data/pipeline/db/soil_microbiome.db \
+  --out /data/pipeline/staging/picrust2/
 
-# 2. Check BIOM file availability
-ssh -i ~/.ssh/id_ed25519_personal deploy@144.76.222.125 \
-  'find /data/pipeline/staging -name "*.biom*" 2>/dev/null | wc -l && \
-   ls /data/pipeline/staging/ | head -20'
+# 2. place_seqs.py (phylogenetic placement of our 16S refs on pro_ref.tre)
+place_seqs.py -s /data/pipeline/staging/picrust2/unique_refs.fna \
+              -o /data/pipeline/staging/picrust2/placed.jplace \
+              -t prokaryotic --processes 36
 
-# 3. Check PICRUSt2 installation
-ssh -i ~/.ssh/id_ed25519_personal deploy@144.76.222.125 \
-  'which picrust2_pipeline.py 2>/dev/null || which picrust2_pipeline 2>/dev/null || echo NOT_FOUND'
+# 3. Build OTU table (NR_ accessions × sample_ids)
+# 4. predict_metagenomes.py → KO abundances
+# 5. Extract K00531 (nifH) per sample
+# 6. Write to DB column: runs.nifh_k00531 (float, nullable)
 ```
+
+**Script to write:** `apps/bnf/scripts/run_picrust2.py` (not yet written)
+
+---
+
+## Alternative: BNF Genus Fraction (simpler, taxonomy-based)
+
+Once backfill completes, `top_genera` will contain real vsearch-derived genus
+names for all samples. A faster alternative to PICRUSt2:
+
+```python
+BNF_GENERA = {
+    "Azotobacter", "Azospirillum", "Rhizobium", "Sinorhizobium",
+    "Mesorhizobium", "Bradyrhizobium", "Azorhizobium", "Ensifer",
+    "Frankia", "Anabaena", "Nostoc", "Trichodesmium", "Crocosphaera",
+    "Herbaspirillum", "Gluconacetobacter", "Burkholderia", "Paenibacillus",
+    "Clostridium", "Desulfovibrio", "Methylocystis", "Methylosinus",
+}
+# bnf_genus_fraction = sum(top_genera[g] for g in top_genera if g in BNF_GENERA)
+```
+
+- Pros: No PICRUSt2, immediately usable from DB, interpretable
+- Cons: Less mechanistic than nifH gene prediction; limited to top 10 genera
+- Cite: Peoples et al. (2009), Vitousek et al. (2013) for BNF genus list
+
+---
+
+## Timeline
+
+| Date | Action |
+|---|---|
+| 2026-03-12 | Gap documented — ASV data discarded, PICRUSt2 unusable |
+| 2026-03-14 01:00 | Pitfall #4 fix — otu_profile column added, 39 sites backfilled |
+| 2026-03-14 10:02 | 237K full backfill launched (PID 658581) |
+| ~2026-03-15 12:00 | Backfill expected complete |
+| Next session | Write run_picrust2.py + place_seqs.py run + nifH feature + LOSO v5 |
+
+## Expected nifH LOSO Impact
+
+The current LOSO r=0.155 is limited by feature granularity (phylum-level only).
+nifH predicted abundance varies 10-100x across NEON sites based on biome:
+- Tropical/subtropical (GUAN, PUUM): high BNF — cyanobacteria, Frankia
+- Warm-season grassland (KONZ, CLBJ): moderate — Azospirillum, Rhizobium
+- Alpine/arctic (NIWO, BARR): low BNF — short season, frozen soils
+
+If PICRUSt2 nifH correctly captures this gradient, Spearman r vs published
+BNF rates should be ≥ 0.35, providing LOSO lift from 0.155 → ~0.30+.
+If not (insufficient read depth at 10K subsample), document limitation and
+re-run with SUBSAMPLE_N=50,000 for top 2 sites per biome.

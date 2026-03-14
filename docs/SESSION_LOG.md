@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-03-14 10:30 CST — 5b7fa48→(next)
+**Done:** Confirmed PICRUSt2 compatibility gap: NR_ accessions NOT directly compatible with PICRUSt2 IMG IDs — must use place_seqs.py path. Updated picrust2_gap_analysis.md with confirmed workflow (place_seqs.py + 16S_ref.fasta extraction + predict_metagenomes.py). BNF genus fraction documented as simpler alternative. Both require backfill to complete.
+**Key metrics:** PICRUSt2 in picrust2 conda env v2.6.3; backfill PID 658581 running; 39/47 sites have otu_profile today
+**Blocked by:** 237K backfill (PID 658581, ETA ~2026-03-15 12:00 CST)
+**Next:** Check backfill completion (tail /tmp/otu_backfill_full.log); write run_picrust2.py; run place_seqs.py on unique NR_ refs; compute nifH per sample; LOSO v5
+
 ## 2026-03-14 10:02 CST — 6b0d23b→f7a6fd0
 **Done:** Verified backfill results (39 sites OK, NR_ accession format confirmed). Added --backfill-otu flag to process_neon_16s.py — finds t0_pass=1 samples missing otu_profile, safe (no t0_pass reset). Launched full 237K OTU backfill (PID 658568, /tmp/otu_backfill_full.log, 36 workers, ETA ~22-30h).
 **Key metrics:** 39 sites have real otu_profile; 237,567 backfill pending; accessions=NR_ NCBI format (PICRUSt2 2.6.3 in picrust2 env)
