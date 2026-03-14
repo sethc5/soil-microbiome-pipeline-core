@@ -112,15 +112,27 @@ def _parse_silva_taxonomy(taxstr: str) -> tuple[str, str]:
     return phylum, genus
 
 
-def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
+# Maximum OTU accessions to retain per sample (covers 95%+ of reads).
+# At 10K reads × 97% hit rate, typical samples have 100–400 unique SILVA
+# accessions. Capping at 500 keeps JSON ≤ ~15 KB per sample (~3.5 GB total).
+_MAX_OTU_ACCESSIONS = 500
+
+
+def _build_profiles(hits_file: Path) -> tuple[dict, dict, float, dict]:
     """
     Read vsearch UC-format output and build taxonomy profiles.
     UC format columns: type, cluster, size, pct_id, strand, ., ., cigar, query, centroid
     Type H=hit, N=no_match.
     Centroid column (index 9) contains the full reference label including taxonomy.
+
+    Returns: (phylum_freq, genus_freq, shannon, otu_counts)
+    otu_counts: {silva_accession: read_count} — raw counts per SILVA ref sequence.
+    This is preserved for PICRUSt2 nifH gene abundance prediction.
+    (Pitfall #4 fix: previously discarded after phylum aggregation.)
     """
     phylum_counts: dict[str, int] = defaultdict(int)
     genus_counts:  dict[str, int] = defaultdict(int)
+    otu_counts:    dict[str, int] = defaultdict(int)
     total = 0
 
     try:
@@ -142,17 +154,19 @@ def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
                 target_label = parts[9] if len(parts) > 9 else ""
                 # Strip the accession (first word) to get tax string
                 label_parts = target_label.split(None, 1)
-                taxstr = label_parts[1] if len(label_parts) > 1 else label_parts[0] if label_parts else "Unknown"
+                accession = label_parts[0] if label_parts else "Unknown"
+                taxstr = label_parts[1] if len(label_parts) > 1 else accession
 
                 phylum, genus = _parse_silva_taxonomy(taxstr)
                 phylum_counts[phylum] += 1
                 genus_counts[genus]   += 1
+                otu_counts[accession] += 1
                 total += 1
     except Exception as e:
         logger.warning("Could not parse UC hits file %s: %s", hits_file, e)
 
     if total == 0:
-        return {}, {}, 0.0
+        return {}, {}, 0.0, {}
 
     phylum_freq = {k: round(v / total, 6)
                    for k, v in sorted(phylum_counts.items(),
@@ -161,13 +175,18 @@ def _build_profiles(hits_file: Path) -> tuple[dict, dict, float]:
                    for k, v in sorted(genus_counts.items(),
                                        key=lambda x: -x[1])[:TOP_N_GENERA]}
 
+    # OTU counts: top _MAX_OTU_ACCESSIONS by read count, raw integers (not freq)
+    # Raw counts (not normalized) are required by PICRUSt2 as input.
+    otu_top = {k: v for k, v in sorted(otu_counts.items(),
+                                        key=lambda x: -x[1])[:_MAX_OTU_ACCESSIONS]}
+
     # Shannon diversity over phyla
     shannon = 0.0
     for p in phylum_freq.values():
         if p > 0:
             shannon -= p * log(p)
 
-    return phylum_freq, genus_freq, round(shannon, 4)
+    return phylum_freq, genus_freq, round(shannon, 4), otu_top
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +435,7 @@ def _process_one_sample(
         return None
 
     # --- Parse profiles ---
-    phylum_profile, top_genera, shannon = _build_profiles(hits_file)
+    phylum_profile, top_genera, shannon, otu_profile = _build_profiles(hits_file)
 
     # Clean up workdir (hits file included)
     try:
@@ -434,6 +453,7 @@ def _process_one_sample(
         "phylum_profile": phylum_profile,
         "top_genera":     top_genera,
         "shannon":        shannon,
+        "otu_profile":    otu_profile,   # {silva_accession: read_count} for PICRUSt2
     }
 
 
@@ -445,6 +465,14 @@ def _db_connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # Ensure otu_profile column exists — safe ADD COLUMN (no-op if already present).
+    # This is a schema extension, not a destructive change (Rule 7 safe).
+    try:
+        conn.execute("ALTER TABLE communities ADD COLUMN otu_profile TEXT DEFAULT NULL")
+        conn.commit()
+        logger.info("Added otu_profile column to communities table")
+    except sqlite3.OperationalError:
+        pass  # Column already exists — normal after first run
     return conn
 
 
@@ -454,13 +482,15 @@ def _update_community(conn: sqlite3.Connection, result: dict) -> None:
         UPDATE communities SET
             phylum_profile    = ?,
             top_genera        = ?,
-            shannon_diversity = ?
+            shannon_diversity = ?,
+            otu_profile       = ?
         WHERE community_id = ?
         """,
         (
             json.dumps(result["phylum_profile"]),
             json.dumps(result["top_genera"]),
             result["shannon"],
+            json.dumps(result.get("otu_profile", {})),
             result["community_id"],
         ),
     )

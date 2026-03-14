@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-03-14 00:51 CST — ec1a396→(next commit)
+**Done:** Pitfall #4 fix — process_neon_16s.py now preserves OTU accession counts alongside phylum profiles. `_build_profiles` returns `otu_counts` dict, `_update_community` writes to new `otu_profile` TEXT column (auto-added via safe ALTER TABLE ADD COLUMN). Future samples will have OTU data stored. Existing 237K samples need backfill (re-download FASTQs for ≥1 sample/site; 470 samples ≈ 4-6 hr job).  
+**Key metrics:** No LOSO change this sub-session — this is the prerequisite for PICRUSt2 nifH feature  
+**Blocked by:** Backfill: reset t0_pass=NULL for sample subset → re-run process_neon_16s.py → then run PICRUSt2  
+**Next:** Backfill OTU profiles (1 sample/site × 47 sites = 47 samples, ~30 min), validate OTU format with PICRUSt2, build nifH feature column
+
 ## 2026-03-14 00:40 CST — c552965→(next commit)
 **Done:** LOSO v4 (corrected labels) ran: r=0.1123 vs baseline 0.1552 (Δ=-0.043, within SE=0.15 for n=47 — NOT statistically significant). CLEAN NEGATIVE RESULT: label quality is NOT a binding constraint. Feature granularity IS the bottleneck — phylum-level 16S cannot distinguish within-biome BNF variation. Corrected labels retained (more scientifically accurate). STATUS.md updated.  
 **Key metrics:** LOSO v4 r=0.1123 (not sig different from v2 r=0.1552); label correction experiment ruled out label quality as bottleneck  
