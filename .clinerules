@@ -166,3 +166,23 @@ Target: LOSO r ≥ 0.45.
 
 **Do not:** invent biological assumptions, claim production-readiness before
 LOSO r ≥ 0.45, or skip the git sync check.
+
+---
+
+## RULE 10 — Session Log
+
+**At session start:** Read the last 2 entries in `docs/SESSION_LOG.md` as fast-context
+(faster than reading STATUS.md in full — tells you what was done and what was next).
+
+**Before calling `attempt_completion`:** Prepend a new entry to `docs/SESSION_LOG.md`:
+
+```markdown
+## YYYY-MM-DD HH:MM CST — <from_commit>→<to_commit>
+**Done:** <1-2 sentences on what was accomplished this session>
+**Key metrics:** <any new numbers — LOSO r, CV R², n_samples, etc.>
+**Blocked by:** <current bottleneck or blocker>
+**Next:** <first action next session>
+```
+
+Format: newest-first (prepend, don't append). Keep entries brief — 4 lines max.
+Commit SESSION_LOG.md with the rest of the session's changes.

@@ -262,6 +262,59 @@ PUBLISHED_BNF_RATES: dict[str, dict] = {
         "source": "Vitousek et al. 2013 (tundra 1–5 kg N ha-1 yr-1, symbiotic + cyanobacterial mats)",
         "notes": "Tundra biomes — high BNF per area from cyanobacterial crusts and Dryas symbioses.",
     },
+    # -----------------------------------------------------------------------
+    # Sites added 2026-03-14: previously unmapped (were using _DEFAULT_BNF=0.7)
+    # These corrections differentiate biomes that were incorrectly assigned
+    # the generic grassland default rate.
+    # -----------------------------------------------------------------------
+    "TOOL": {
+        "bnf_kg_N_ha_yr": 2.0,
+        "biome": "arctic_moist_tundra",
+        "source": "Hobara et al. 2006 (via Mack et al.): arctic tundra 0.8-2.0 kg N ha-1 yr-1; Stuart et al. 2020 (Ecosystems, moss-associated BNF at Toolik); Vitousek et al. 2013",
+        "notes": "Toolik Field Station, AK. Moist tussock tundra on Alaska North Slope. High moss-associated and cyanobacterial BNF. Was incorrectly assigned grassland default (0.7). Corrected to moist tundra midpoint.",
+    },
+    "UNDE": {
+        "bnf_kg_N_ha_yr": 1.2,
+        "biome": "temperate_deciduous_forest",
+        "source": "Vitousek et al. 2013 (temperate deciduous 0.5-2.0 kg N ha-1 yr-1); Reed et al. 2011",
+        "notes": "University of Notre Dame Environmental Research Center, MI. Northern hardwood (sugar maple-basswood-yellow birch). Was assigned grassland default. Corrected to northern hardwood rate.",
+    },
+    "STEI": {
+        "bnf_kg_N_ha_yr": 1.1,
+        "biome": "temperate_mixed_forest",
+        "source": "Vitousek et al. 2013 (temperate mixed forest 0.5-2.0 kg N ha-1 yr-1); Reed et al. 2011",
+        "notes": "Steigerwaldt-Chequamegon, WI (Chequamegon-Nicolet National Forest). Northern mixed hardwood-conifer. Was assigned grassland default. Corrected to northern mixed forest rate.",
+    },
+    "TREE": {
+        "bnf_kg_N_ha_yr": 1.1,
+        "biome": "temperate_deciduous_forest",
+        "source": "Vitousek et al. 2013 (temperate deciduous 0.5-2.0 kg N ha-1 yr-1); Reed et al. 2011",
+        "notes": "Treehaven, WI (UW Research Station, Tomahawk WI). Northern hardwood. Was assigned grassland default. Corrected to northern hardwood rate.",
+    },
+    "TALL": {
+        "bnf_kg_N_ha_yr": 1.0,
+        "biome": "longleaf_pine_savanna",
+        "source": "Reed et al. 2011 (southern pine 0.5-2.0 kg N ha-1 yr-1); Smercina et al. 2019",
+        "notes": "Talladega National Forest, AL. Longleaf pine and upland oak. Was assigned grassland default. Corrected to longleaf pine savanna — similar to JERC (1.2) but slightly lower upland rate.",
+    },
+    "UKFS": {
+        "bnf_kg_N_ha_yr": 1.3,
+        "biome": "tallgrass_prairie_oak_woodland",
+        "source": "Smercina et al. 2019 (tallgrass prairie 0.8-2.4 kg N ha-1 yr-1); Vitousek et al. 2013",
+        "notes": "University of Kansas Field Station, Lawrence KS. Tallgrass prairie-oak woodland transition. Was assigned grassland default. Corrected to tallgrass prairie-woodland midpoint.",
+    },
+    "YELL": {
+        "bnf_kg_N_ha_yr": 0.9,
+        "biome": "montane_conifer_shrubland",
+        "source": "Vitousek et al. 2013 (subalpine conifer 0.5-2.0 kg N ha-1 yr-1); Reed et al. 2011",
+        "notes": "Yellowstone National Park, WY. Lodgepole pine + mountain sagebrush + grassland mosaic. Was assigned grassland default. Corrected to montane conifer-shrubland midpoint (lower than Pacific NW conifer due to semi-arid component).",
+    },
+    "STER": {
+        "bnf_kg_N_ha_yr": 0.6,
+        "biome": "shortgrass_steppe",
+        "source": "Smercina et al. 2019 (shortgrass steppe 0.3-1.5 kg N ha-1 yr-1, low end); Reed et al. 2011",
+        "notes": "Sterling, CO. Eastern Colorado plains, semi-arid shortgrass steppe. Was assigned grassland default (0.7). Corrected to shortgrass steppe low end — similar to NOGP (0.6).",
+    },
     # Additional NEON sites (added after first run identified unmapped sites)
     "BARR": {
         "bnf_kg_N_ha_yr": 2.8,
