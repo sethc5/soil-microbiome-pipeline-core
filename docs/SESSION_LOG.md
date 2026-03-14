@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-03-14 00:25 CST — 1a88433→ec2daf5
+**Done:** SESSION_LOG.md + Rule 10 added; 8 unmapped NEON sites corrected in fetch_published_bnf.py (TOOL 0.7→2.0 kg/ha/yr, UNDE/STEI/TREE 0.7→1.1-1.2, TALL 0.7→1.0, UKFS 0.7→1.3, YELL 0.7→0.9, STER 0.7→0.6); bnf_measurements.csv rebuilt on server (all 47 sites now mapped); LOSO v4 launched (PID 650980, /tmp/loso_v4.log, ~8 min)  
+**Key metrics:** bnf_measurements.csv: 237,567 samples, 47/47 sites mapped (was 39/47 properly mapped); unique label values will increase from 21 to ~29+  
+**Blocked by:** LOSO v4 results not yet available (running)  
+**Next:** Check /tmp/loso_v4.log → loso_report_v4labels.json → compare r to 0.1552; if improved, retrain v4 model with new labels; update STATUS.md
+
+---
+
 ## 2026-03-14 00:10 CST — cae7129→1a88433
 **Done:** v3 training completed overnight (CV R²=0.462 ≈ v2 0.448 — feature engineering confirmed not bottleneck); top_genera provenance confirmed non-useful (FBA-derived, Pitfall #9); LOSO per-site analysis — spearman_r field fixed in loso_report.json on server; label quality bottleneck identified  
 **Key metrics:** LOSO r=0.1552 confirmed, v3 CV R²=0.462, 21 unique labels/47 sites  
