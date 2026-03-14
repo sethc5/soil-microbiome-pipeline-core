@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-03-14 10:02 CST — 6b0d23b→f7a6fd0
+**Done:** Verified backfill results (39 sites OK, NR_ accession format confirmed). Added --backfill-otu flag to process_neon_16s.py — finds t0_pass=1 samples missing otu_profile, safe (no t0_pass reset). Launched full 237K OTU backfill (PID 658568, /tmp/otu_backfill_full.log, 36 workers, ETA ~22-30h).
+**Key metrics:** 39 sites have real otu_profile; 237,567 backfill pending; accessions=NR_ NCBI format (PICRUSt2 2.6.3 in picrust2 env)
+**Blocked by:** Backfill running overnight — need ~22-30h to complete
+**Next:** tail /tmp/otu_backfill_full.log (tomorrow); verify n_ok >200K; spot-check NR_ vs PICRUSt2 ref; write run_picrust2.py; build nifH feature; LOSO v5
+
 ## 2026-03-14 01:04 CST — ec1a396→c8d9fc8 (+ backfill running)
 **Done:** Pitfall #4 fix complete + backfill launched. process_neon_16s.py modified to preserve OTU accession counts (otu_profile column, auto-added). Backfill: reset t0_pass=NULL for 47 samples (1/site) → 269 samples processed (script found all pending with notes). otu_profile column confirmed added to DB. First completions showing: KONA ✓ (14 phyla), KONZ ✓ (16 phyla). JGI shotgun correctly skipped. ETA ~35 min.  
 **Key metrics:** Backfill PID 655428, /tmp/otu_backfill.log; otu_profile column added to communities table  
