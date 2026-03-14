@@ -502,9 +502,15 @@ def _update_community(conn: sqlite3.Connection, result: dict) -> None:
 
 
 def _fetch_pending_samples(
-    conn: sqlite3.Connection, sites: list[str] | None
+    conn: sqlite3.Connection, sites: list[str] | None,
+    backfill_otu: bool = False,
 ) -> list[tuple]:
-    """Return (sample_id, community_id, notes) for pending NEON samples."""
+    """Return (sample_id, community_id, notes) for pending NEON samples.
+
+    backfill_otu=True: return already-processed samples (t0_pass=1) that are
+    missing otu_profile — used to backfill OTU counts for PICRUSt2 without
+    resetting t0_pass for the whole dataset.
+    """
     site_filter = ""
     params: list = ["neon"]
     if sites:
@@ -512,16 +518,31 @@ def _fetch_pending_samples(
         site_filter = f" AND s.site_id IN ({placeholders})"
         params.extend(sites)
 
+    if backfill_otu:
+        # Safe backfill: only samples that succeeded before but lack otu_profile
+        # Does NOT reset t0_pass — just re-downloads and adds otu_profile column.
+        where_clause = """
+          WHERE s.source = ?
+            AND r.t0_pass = 1
+            AND (c.otu_profile IS NULL OR c.otu_profile = '{}')
+            AND c.notes IS NOT NULL
+            AND c.notes != '[]'
+        """
+    else:
+        where_clause = """
+          WHERE s.source = ?
+            AND (r.t0_pass = 0 OR r.t0_pass IS NULL)
+            AND c.notes IS NOT NULL
+            AND c.notes != '[]'
+        """
+
     return conn.execute(
         f"""
         SELECT s.sample_id, c.community_id, c.notes
         FROM communities c
         JOIN samples s ON c.sample_id = s.sample_id
         JOIN runs r ON r.sample_id = s.sample_id
-        WHERE s.source = ?
-          AND (r.t0_pass = 0 OR r.t0_pass IS NULL)
-          AND c.notes IS NOT NULL
-          AND c.notes != '[]'
+        {where_clause}
           {site_filter}
         ORDER BY s.site_id, s.sample_id
         """,
@@ -549,6 +570,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--target-id", default="carbon_sequestration")
+    p.add_argument("--backfill-otu", action="store_true",
+                   help="Backfill otu_profile for samples that already have t0_pass=1 "
+                        "but are missing otu_profile. Safe: does not reset t0_pass. "
+                        "Use for the one-time 237K OTU backfill job.")
     return p.parse_args()
 
 
@@ -573,7 +598,10 @@ def main() -> None:
 
     conn = _db_connect(args.db)
     sites = None if args.all_sites else args.sites
-    pending = _fetch_pending_samples(conn, sites)
+    pending = _fetch_pending_samples(conn, sites, backfill_otu=args.backfill_otu)
+    if args.backfill_otu:
+        logger.info("OTU BACKFILL MODE: reprocessing %d samples missing otu_profile",
+                    len(pending))
 
     if not pending:
         logger.info("No pending NEON samples with FASTQ URLs.")
