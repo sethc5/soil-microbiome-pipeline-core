@@ -1,0 +1,73 @@
+defaults:
+  community:
+    diazotrophs: 0.45
+    decomposers: 0.38
+    competitors: 0.22
+    stress_tolerant_taxa: 0.32
+  environment:
+    soil_ph: 6.8
+    organic_matter_pct: 5.2
+    moisture: 0.62
+    temperature_c: 24.0
+  intervention:
+    inoculation_strength: 0.35
+    amendment_strength: 0.25
+    management_shift: 0.10
+
+drift_thresholds:
+  max_failed_checks: 0
+  min_pass_rate: 1.0
+
+checks:
+  - id: diazotroph_flux_monotonic
+    type: monotonic_sweep
+    sweep_path: community.diazotrophs
+    values: [0.10, 0.25, 0.40, 0.55, 0.70]
+    metric: target_flux
+    direction: increasing
+    min_total_change: 25.0
+    expected_value: 58.0
+    max_abs_drift: 22.0
+
+  - id: competitor_stability_decreases
+    type: monotonic_sweep
+    sweep_path: community.competitors
+    values: [0.10, 0.25, 0.40, 0.55, 0.70]
+    metric: stability_score
+    direction: decreasing
+    min_total_change: 0.08
+    expected_value: 0.09
+    max_abs_drift: 0.06
+
+  - id: ph_band_flux_penalty
+    type: band_comparison
+    sweep_path: environment.soil_ph
+    low_values: [4.2, 4.6, 5.0]
+    high_values: [6.4, 6.8, 7.2]
+    metric: target_flux
+    expectation: high_gt_low
+    min_ratio: 1.8
+    expected_value: 2.8
+    max_abs_drift: 1.8
+
+  - id: ph_band_stability_penalty
+    type: band_comparison
+    sweep_path: environment.soil_ph
+    low_values: [4.2, 4.6, 5.0]
+    high_values: [6.4, 6.8, 7.2]
+    metric: stability_score
+    expectation: high_gt_low
+    min_ratio: 1.2
+    expected_value: 1.35
+    max_abs_drift: 0.35
+
+  - id: low_organic_matter_flux_cap
+    type: band_comparison
+    sweep_path: environment.organic_matter_pct
+    low_values: [0.5, 1.0, 1.5]
+    high_values: [4.0, 6.0, 8.0]
+    metric: target_flux
+    expectation: high_gt_low
+    min_ratio: 2.0
+    expected_value: 3.4
+    max_abs_drift: 2.0

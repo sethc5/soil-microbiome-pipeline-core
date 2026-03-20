@@ -21,7 +21,29 @@ __all__ = [
     "run_ranking_benchmark",
     "append_benchmark_history",
     "load_benchmark_history",
+    "load_calibration_config",
+    "evaluate_calibration_config",
+    "run_calibration",
 ]
+
+
+def load_calibration_config(*args, **kwargs):
+    from .calibration import load_calibration_config as _fn
+
+    return _fn(*args, **kwargs)
+
+
+def evaluate_calibration_config(*args, **kwargs):
+    from .calibration import evaluate_calibration_config as _fn
+
+    return _fn(*args, **kwargs)
+
+
+def run_calibration(*args, **kwargs):
+    from .calibration import run_calibration as _fn
+
+    return _fn(*args, **kwargs)
+
 
 try:
     from .surrogate import (

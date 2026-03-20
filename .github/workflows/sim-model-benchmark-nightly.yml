@@ -1,23 +1,14 @@
-name: sim-model-benchmark-gate
+name: sim-model-benchmark-nightly
 
 on:
-  pull_request:
-    paths:
-      - "sim_model/**"
-      - "core/analysis/**"
-      - ".github/workflows/sim-model-benchmark-gate.yml"
-  push:
-    branches:
-      - main
-    paths:
-      - "sim_model/**"
-      - "core/analysis/**"
-      - ".github/workflows/sim-model-benchmark-gate.yml"
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
 
 jobs:
-  benchmark-gate:
+  benchmark-stress-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,26 +18,34 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run sim_model benchmark gate
+      - name: Run stress benchmark gate with trend assertion
         run: |
           python -m sim_model.benchmark_gate \
-            --seeds 7,13,29 \
-            --worlds 180 \
-            --candidates 10 \
+            --seeds 5,7,11,13,17,19 \
+            --worlds 320 \
+            --candidates 12 \
             --top-k 3 \
             --min-top1-lift 0.03 \
             --min-topk-lift 0.02 \
             --min-regret-reduction 0.25 \
             --min-hit-rate-margin 0.15 \
+            --history-path reference/sim_model_benchmark_history.jsonl \
+            --trend-window 20 \
+            --min-history-entries 1 \
+            --fail-on-missing-history \
+            --max-top1-lift-drop 0.05 \
+            --max-topk-lift-drop 0.05 \
+            --max-regret-reduction-drop 0.12 \
+            --max-hit-rate-margin-drop 0.12 \
             --report-json-path results/sim_model_benchmark_latest.json \
             --report-md-path results/sim_model_benchmark_summary.md \
             --append-step-summary \
             --json
 
-      - name: Upload benchmark artifacts
+      - name: Upload nightly benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sim-model-benchmark-gate
+          name: sim-model-benchmark-nightly
           path: |
             results/sim_model_benchmark_latest.json
             results/sim_model_benchmark_summary.md
