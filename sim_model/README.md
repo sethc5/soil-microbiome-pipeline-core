@@ -148,17 +148,51 @@ The full pipeline then becomes the realism layer that replaces toy assumptions w
 
 But it should preserve the same basic concepts and outputs.
 
+## Current state
+
+All steps in the minimal ladder are complete, plus 5 additional capability gaps:
+
+| Module | Tests | What it does |
+|---|---|---|
+| `schema.py` | — | Community, Environment, Intervention, SimulationResult |
+| `dynamics.py` | — | Toy equations with guild budget normalization + resource consumption |
+| `scenarios.py` | — | 5 hand-designed test cases |
+| `simulate.py` | 3 | CLI runner with scenario selection + overrides |
+| `surrogate.py` | 1 | RF regressor + classifier on synthetic data |
+| `population.py` | 20 | T0 filtering simulation (raw samples → quality/metadata/gene filters) |
+| `targets.py` | 11 | 4 application targets (BNF, carbon, pathogen, phosphorus) |
+| `interventions.py` | 20 | 8 named interventions with pH/moisture compatibility |
+| `spatial.py` | 16 | 5 US geographic regions, clustering, cluster ranking |
+| `adapter.py` | 4 | Pipeline metadata → sim input mapping |
+| `benchmark.py` | 3 | Multi-world ranking benchmark (funnel vs random vs oracle) |
+| `benchmark_gate.py` | 8 | CI gate with trend detection |
+| `calibration.py` | 3 | Drift detection (9 qualitative checks) |
+| `history_health.py` | 2 | Benchmark baseline staleness checker |
+| **Total** | **113** | |
+
+**Gates:** benchmark gate ✅, calibration gate 9/9 ✅
+
+**Rigor fixes applied:**
+- Guild budget: abundances normalized to sum to 1.0
+- Resource consumption: high primary guild + low OM → reduced flux
+- Perturbation modeling: drought/heat/fertilizer/acid_rain presets
+
 ## Near-term success criterion
 
 This folder is useful once we can:
 
-- run a toy simulation from a few inputs
-- generate a small synthetic dataset
-- train a surrogate on that dataset
-- recover known high-value communities better than random
-- explain why a candidate passed or failed
+- [x] run a toy simulation from a few inputs
+- [x] generate a small synthetic dataset
+- [x] train a surrogate on that dataset
+- [x] recover known high-value communities better than random
+- [x] explain why a candidate passed or failed
+- [x] simulate T0 filtering on raw sample populations
+- [x] switch between 4 application targets via config
+- [x] rank specific named interventions (not just classes)
+- [x] cluster communities geographically and rank clusters
+- [x] model resource consumption and guild budget constraints
 
-At that point, the project has a small executable theory instead of only a large aspirational architecture.
+The project now has a small executable theory that covers the full funnel from raw samples through spatial ranking.
 
 ## CI benchmark gate
 
