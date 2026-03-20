@@ -54,6 +54,14 @@ jobs:
             --append-step-summary \
             --json
 
+      - name: Warn if trend baseline is stale
+        if: github.event_name == 'pull_request'
+        run: |
+          python -m sim_model.history_health \
+            --history-path reference/sim_model_benchmark_history.jsonl \
+            --warn-if-older-than-days 21 \
+            --append-step-summary
+
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -61,4 +69,76 @@ jobs:
           path: |
             results/sim_model_benchmark_latest.json
             results/sim_model_benchmark_summary.md
+          if-no-files-found: error
+
+  rank-uncertainty-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install rank job deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install typer pyyaml
+
+      - name: Build fixture DB
+        run: |
+          python scripts/ops/create_rank_fixture_db.py --db /tmp/rank_fixture.db
+
+      - name: Run rank_candidates in uncertainty mode
+        run: |
+          python -m core.analysis.rank_candidates \
+            --config configs/config.example.yaml \
+            --db /tmp/rank_fixture.db \
+            --top 3 \
+            --output /tmp/ranked_uncertainty.csv \
+            --scoring-mode hybrid \
+            --legacy-weight 0.40 \
+            --uncertainty-samples 20 \
+            --risk-aversion 1.10 \
+            --uncertainty-seed 123
+
+      - name: Validate ranked output schema
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+
+          path = Path("/tmp/ranked_uncertainty.csv")
+          assert path.exists(), "ranked output CSV missing"
+          with path.open(newline="", encoding="utf-8") as fh:
+              rows = list(csv.DictReader(fh))
+          assert rows, "ranked output is empty"
+          required = {
+              "composite_score",
+              "score_mean",
+              "score_std",
+              "risk_adjusted_score",
+              "uncertainty_samples_used",
+              "risk_reason",
+              "scoring_mode",
+          }
+          missing = required - set(rows[0].keys())
+          assert not missing, f"missing output columns: {sorted(missing)}"
+
+          for row in rows:
+              assert row["scoring_mode"] == "hybrid", row
+              assert row["risk_reason"], row
+              assert int(float(row["uncertainty_samples_used"])) > 0, row
+              assert float(row["risk_adjusted_score"]) <= float(row["score_mean"]) + 1e-12, row
+          print(f"validated {len(rows)} ranked rows")
+          PY
+
+      - name: Upload uncertainty rank artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rank-uncertainty-fixture
+          path: /tmp/ranked_uncertainty.csv
           if-no-files-found: error

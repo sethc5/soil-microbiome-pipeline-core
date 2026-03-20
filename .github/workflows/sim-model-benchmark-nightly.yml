@@ -37,6 +37,7 @@ jobs:
             --max-topk-lift-drop 0.05 \
             --max-regret-reduction-drop 0.12 \
             --max-hit-rate-margin-drop 0.12 \
+            --append-history-path reference/sim_model_benchmark_history.jsonl \
             --report-json-path results/sim_model_benchmark_latest.json \
             --report-md-path results/sim_model_benchmark_summary.md \
             --append-step-summary \
@@ -49,4 +50,5 @@ jobs:
           path: |
             results/sim_model_benchmark_latest.json
             results/sim_model_benchmark_summary.md
+            reference/sim_model_benchmark_history.jsonl
           if-no-files-found: error

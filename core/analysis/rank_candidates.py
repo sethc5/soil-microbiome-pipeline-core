@@ -243,6 +243,38 @@ def _uncertainty_scores(
     return score_mean, score_std, risk_adjusted_score, len(sampled_scores)
 
 
+def _derive_risk_reason(
+    score_data: dict[str, Any],
+    scoring_mode: str,
+    uncertainty_samples: int,
+    risk_aversion: float,
+) -> str:
+    sim_score = score_data.get("sim_score")
+    score_std = float(score_data.get("score_std") or 0.0)
+    score_mean = float(score_data.get("score_mean") or 0.0)
+    risk_adjusted_score = float(score_data.get("risk_adjusted_score") or 0.0)
+    samples_used = int(score_data.get("uncertainty_samples_used") or 0)
+
+    if scoring_mode == "legacy":
+        return "legacy_mode"
+    if sim_score is None:
+        return "sim_unavailable_legacy_fallback"
+    if uncertainty_samples <= 0:
+        return "uncertainty_disabled"
+    if samples_used < max(1, uncertainty_samples // 2):
+        return "uncertainty_samples_too_sparse"
+    if samples_used < uncertainty_samples:
+        return "uncertainty_samples_partial"
+    if score_std < 0.010:
+        return "low_uncertainty"
+    if score_std < 0.030:
+        return "moderate_uncertainty"
+    penalty = score_mean - risk_adjusted_score
+    if penalty >= max(0.05, 1.5 * risk_aversion * 0.03):
+        return "high_uncertainty_penalized"
+    return "high_uncertainty"
+
+
 def _score_row(
     row: dict[str, Any],
     scoring_mode: str,
@@ -386,11 +418,9 @@ def rank(
     if risk_aversion < 0.0:
         raise typer.BadParameter("risk_aversion must be >= 0.")
 
-    database = SoilDB(str(db))
-
     # Retrieve all completed T1/T2 runs
-    with database._connect() as conn:
-        rows = conn.execute(
+    with SoilDB(str(db)) as database:
+        rows = database.conn.execute(
             """
             SELECT r.run_id, r.community_id, r.run_date,
                    r.t0_pass, r.t0_depth_ok,
@@ -440,6 +470,12 @@ def rank(
         d["score_std"] = score_data["score_std"]
         d["risk_adjusted_score"] = score_data["risk_adjusted_score"]
         d["uncertainty_samples_used"] = score_data["uncertainty_samples_used"]
+        d["risk_reason"] = _derive_risk_reason(
+            score_data=score_data,
+            scoring_mode=scoring_mode,
+            uncertainty_samples=uncertainty_samples,
+            risk_aversion=risk_aversion,
+        )
         d["scoring_mode"] = scoring_mode
 
         top_candidate = _extract_top_intervention_candidate(d.get("t2_interventions"))
@@ -460,6 +496,7 @@ def rank(
         "rank", "community_id", "sample_id",
         "scoring_mode", "composite_score", "legacy_score", "sim_score",
         "score_mean", "score_std", "risk_adjusted_score", "uncertainty_samples_used",
+        "risk_reason",
         "t1_target_flux", "t1_model_confidence",
         "t2_stability_score", "t2_resistance", "t2_resilience",
         "t2_functional_redundancy", "top_intervention",

@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.analysis.rank_candidates import (
+    _derive_risk_reason,
     _extract_top_intervention_candidate,
     _legacy_composite_score,
     _score_row,
@@ -75,6 +76,14 @@ def test_uncertainty_outputs_present_for_sim_mode():
     assert data["uncertainty_samples_used"] == 24
     assert data["score_std"] >= 0.0
     assert data["risk_adjusted_score"] <= data["score_mean"] + 1e-12
+    reason = _derive_risk_reason(
+        score_data=data,
+        scoring_mode="sim",
+        uncertainty_samples=24,
+        risk_aversion=1.2,
+    )
+    assert isinstance(reason, str)
+    assert len(reason) > 0
 
 
 def test_uncertainty_disabled_defaults_to_composite():
@@ -89,3 +98,22 @@ def test_uncertainty_disabled_defaults_to_composite():
     assert data["score_mean"] == data["composite_score"]
     assert data["score_std"] == 0.0
     assert data["risk_adjusted_score"] == data["composite_score"]
+    reason = _derive_risk_reason(
+        score_data=data,
+        scoring_mode="hybrid",
+        uncertainty_samples=0,
+        risk_aversion=1.5,
+    )
+    assert reason == "uncertainty_disabled"
+
+
+def test_risk_reason_for_legacy_and_fallback():
+    legacy_data = _score_row(_base_row(), scoring_mode="legacy", legacy_weight=0.5)
+    assert _derive_risk_reason(legacy_data, "legacy", uncertainty_samples=10, risk_aversion=1.0) == "legacy_mode"
+
+    fallback_data = dict(legacy_data)
+    fallback_data["sim_score"] = None
+    assert (
+        _derive_risk_reason(fallback_data, "sim", uncertainty_samples=10, risk_aversion=1.0)
+        == "sim_unavailable_legacy_fallback"
+    )

@@ -1,0 +1,183 @@
+{
+  "aggregate": {
+    "avg_hit_rate_margin": 0.5277777777777778,
+    "avg_regret_reduction": 0.912909971995838,
+    "avg_top1_lift": 0.10738395919671258,
+    "avg_topk_lift": 0.08149985586489393,
+    "min_hit_rate_margin": 0.5055555555555555,
+    "min_regret_reduction": 0.9014099064422058,
+    "min_top1_lift": 0.102595017748861,
+    "min_topk_lift": 0.07928105309539196
+  },
+  "failures": [],
+  "gate_config": {
+    "candidates": 10,
+    "seeds": [
+      7,
+      13,
+      29
+    ],
+    "thresholds": {
+      "min_hit_rate_margin": 0.15,
+      "min_regret_reduction": 0.25,
+      "min_top1_lift": 0.03,
+      "min_topk_lift": 0.02
+    },
+    "top_k": 3,
+    "trend": {
+      "fail_on_missing_history": false,
+      "history_path": null,
+      "min_history_entries": 1,
+      "thresholds": {
+        "max_hit_rate_margin_drop": 0.1,
+        "max_regret_reduction_drop": 0.08,
+        "max_top1_lift_drop": 0.04,
+        "max_topk_lift_drop": 0.04
+      },
+      "trend_window": 20
+    },
+    "worlds": 180
+  },
+  "passed": true,
+  "per_seed": [
+    {
+      "config": {
+        "n_candidates": 10,
+        "n_worlds": 180,
+        "random_state": 7,
+        "top_k": 3
+      },
+      "hit_rate_margin": 0.5388888888888889,
+      "lifts": {
+        "funnel_vs_random_regret_reduction": 0.9014099064422058,
+        "funnel_vs_random_top1_lift": 0.11022952477798513,
+        "funnel_vs_random_topk_lift": 0.07992292430404957,
+        "heuristic_vs_random_top1_lift": 0.08223315833044595
+      },
+      "seed": 7,
+      "summary": {
+        "funnel": {
+          "hit_optimal": 0.6333333333333333,
+          "top1_regret": 0.0013908490764053714,
+          "top1_true_score": 0.12808075877912756,
+          "topk_avg_true_score": 0.12454346543031579
+        },
+        "heuristic": {
+          "hit_optimal": 0.4777777777777778,
+          "top1_regret": 0.004620627944316828,
+          "top1_true_score": 0.12485097991121609,
+          "topk_avg_true_score": 0.12089425581022846
+        },
+        "oracle": {
+          "hit_optimal": 1.0,
+          "top1_regret": 0.0,
+          "top1_true_score": 0.12947160785553294,
+          "topk_avg_true_score": 0.12553109899291273
+        },
+        "random": {
+          "hit_optimal": 0.09444444444444444,
+          "top1_regret": 0.014107391789724241,
+          "top1_true_score": 0.11536421606580867,
+          "topk_avg_true_score": 0.11532625396444579
+        }
+      }
+    },
+    {
+      "config": {
+        "n_candidates": 10,
+        "n_worlds": 180,
+        "random_state": 13,
+        "top_k": 3
+      },
+      "hit_rate_margin": 0.5055555555555555,
+      "lifts": {
+        "funnel_vs_random_regret_reduction": 0.9078987353984294,
+        "funnel_vs_random_top1_lift": 0.102595017748861,
+        "funnel_vs_random_topk_lift": 0.08529559019524025,
+        "heuristic_vs_random_top1_lift": 0.06298553629845179
+      },
+      "seed": 13,
+      "summary": {
+        "funnel": {
+          "hit_optimal": 0.6222222222222222,
+          "top1_regret": 0.0010945455279499925,
+          "top1_true_score": 0.1159565815000987,
+          "topk_avg_true_score": 0.11286834725599258
+        },
+        "heuristic": {
+          "hit_optimal": 0.4,
+          "top1_regret": 0.005260154831498637,
+          "top1_true_score": 0.11179097219655007,
+          "topk_avg_true_score": 0.10974946892997117
+        },
+        "oracle": {
+          "hit_optimal": 1.0,
+          "top1_regret": 0.0,
+          "top1_true_score": 0.1170511270280487,
+          "topk_avg_true_score": 0.11368928915938119
+        },
+        "random": {
+          "hit_optimal": 0.11666666666666667,
+          "top1_regret": 0.011884153086116539,
+          "top1_true_score": 0.10516697394193217,
+          "topk_avg_true_score": 0.10399779403479197
+        }
+      }
+    },
+    {
+      "config": {
+        "n_candidates": 10,
+        "n_worlds": 180,
+        "random_state": 29,
+        "top_k": 3
+      },
+      "hit_rate_margin": 0.5388888888888889,
+      "lifts": {
+        "funnel_vs_random_regret_reduction": 0.929421274146879,
+        "funnel_vs_random_top1_lift": 0.10932733506329163,
+        "funnel_vs_random_topk_lift": 0.07928105309539196,
+        "heuristic_vs_random_top1_lift": 0.07157177726360422
+      },
+      "seed": 29,
+      "summary": {
+        "funnel": {
+          "hit_optimal": 0.6666666666666666,
+          "top1_regret": 0.0009569523439082764,
+          "top1_true_score": 0.12786746592651543,
+          "topk_avg_true_score": 0.1240663666107079
+        },
+        "heuristic": {
+          "hit_optimal": 0.4722222222222222,
+          "top1_regret": 0.005308875665271919,
+          "top1_true_score": 0.1235155426051518,
+          "topk_avg_true_score": 0.12053157778988033
+        },
+        "oracle": {
+          "hit_optimal": 1.0,
+          "top1_regret": 0.0,
+          "top1_true_score": 0.1288244182704237,
+          "topk_avg_true_score": 0.12479311772045791
+        },
+        "random": {
+          "hit_optimal": 0.12777777777777777,
+          "top1_regret": 0.013558651453977173,
+          "top1_true_score": 0.11526576681644654,
+          "topk_avg_true_score": 0.11495278848348534
+        }
+      }
+    }
+  ],
+  "template_metadata": {
+    "description": "Template example for PR benchmark artifacts.",
+    "generator": "scripts/ops/generate_sim_model_report_templates.py"
+  },
+  "trend": {
+    "enabled": false,
+    "fail_on_missing_history": false,
+    "failures": [],
+    "history_path": null,
+    "min_history_entries": 1,
+    "passed": true,
+    "trend_window": 20
+  }
+}
