@@ -1,0 +1,4 @@
+baseline_loso_spearman_r: 0.1552
+min_loso_spearman_r: 0.12
+max_allowed_drop_from_baseline: 0.03
+min_sites: 40

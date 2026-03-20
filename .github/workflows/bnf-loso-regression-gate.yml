@@ -1,0 +1,111 @@
+name: bnf-loso-regression-gate
+
+on:
+  schedule:
+    - cron: "30 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      db_path:
+        description: "Override SQLite DB path for LOSO run"
+        required: false
+        type: string
+      bnf_csv_path:
+        description: "Override published BNF labels CSV path"
+        required: false
+        type: string
+      n_trees:
+        description: "RF trees per LOSO fold"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  loso-regression-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BNF_LOSO_DB_PATH: ${{ vars.BNF_LOSO_DB_PATH }}
+      BNF_LOSO_CSV_PATH: ${{ vars.BNF_LOSO_CSV_PATH }}
+      BNF_LOSO_N_TREES: ${{ vars.BNF_LOSO_N_TREES }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install LOSO gate deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scikit-learn pyyaml
+
+      - name: Resolve LOSO gate inputs
+        id: resolve_loso
+        run: |
+          db_path="${{ github.event.inputs.db_path }}"
+          csv_path="${{ github.event.inputs.bnf_csv_path }}"
+          trees="${{ github.event.inputs.n_trees }}"
+
+          if [ -z "$db_path" ]; then
+            db_path="$BNF_LOSO_DB_PATH"
+          fi
+          if [ -z "$csv_path" ]; then
+            csv_path="$BNF_LOSO_CSV_PATH"
+          fi
+          if [ -z "$trees" ]; then
+            trees="$BNF_LOSO_N_TREES"
+          fi
+          if [ -z "$trees" ]; then
+            trees="200"
+          fi
+
+          if [ -z "$db_path" ] || [ -z "$csv_path" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::BNF_LOSO_DB_PATH and/or BNF_LOSO_CSV_PATH not configured. Skipping LOSO regression gate."
+            {
+              echo "## BNF LOSO Regression Gate"
+              echo ""
+              echo "- Status: **SKIPPED**"
+              echo "- Reason: missing LOSO input paths (\`BNF_LOSO_DB_PATH\`, \`BNF_LOSO_CSV_PATH\`)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "db_path=$db_path" >> "$GITHUB_OUTPUT"
+          echo "csv_path=$csv_path" >> "$GITHUB_OUTPUT"
+          echo "trees=$trees" >> "$GITHUB_OUTPUT"
+
+      - name: Run LOSO CV on real-data snapshot
+        if: steps.resolve_loso.outputs.configured == 'true'
+        run: |
+          mkdir -p results
+          python apps/bnf/scripts/loso_cv_bnf_surrogate.py \
+            --db "${{ steps.resolve_loso.outputs.db_path }}" \
+            --bnf-csv "${{ steps.resolve_loso.outputs.csv_path }}" \
+            --out results/bnf_loso_report.json \
+            --n-trees "${{ steps.resolve_loso.outputs.trees }}"
+
+      - name: Enforce LOSO non-regression thresholds
+        if: steps.resolve_loso.outputs.configured == 'true'
+        run: |
+          python apps/bnf/scripts/loso_regression_gate.py \
+            --report results/bnf_loso_report.json \
+            --config configs/bnf_loso_regression.yaml \
+            --append-step-summary \
+            --json > results/bnf_loso_gate_eval.json
+          cat results/bnf_loso_gate_eval.json
+
+      - name: Upload LOSO gate artifacts
+        if: steps.resolve_loso.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bnf-loso-regression-gate
+          path: |
+            results/bnf_loso_report.json
+            results/bnf_loso_gate_eval.json
+          if-no-files-found: error

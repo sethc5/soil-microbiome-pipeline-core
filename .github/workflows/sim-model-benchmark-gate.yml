@@ -6,8 +6,10 @@ on:
       - "sim_model/**"
       - "core/analysis/**"
       - "configs/sim_model_calibration.yaml"
+      - "scripts/ops/rank_shadow_compare.py"
       - "scripts/ops/create_rank_fixture_db.py"
       - "tests/test_rank_candidates_cli_integration.py"
+      - "tests/test_rank_shadow_compare.py"
       - ".github/workflows/sim-model-benchmark-gate.yml"
   push:
     branches:
@@ -16,8 +18,10 @@ on:
       - "sim_model/**"
       - "core/analysis/**"
       - "configs/sim_model_calibration.yaml"
+      - "scripts/ops/rank_shadow_compare.py"
       - "scripts/ops/create_rank_fixture_db.py"
       - "tests/test_rank_candidates_cli_integration.py"
+      - "tests/test_rank_shadow_compare.py"
       - ".github/workflows/sim-model-benchmark-gate.yml"
 
 jobs:
@@ -155,14 +159,39 @@ jobs:
 
       - name: Run rank CLI integration tests
         run: |
-          python -m pytest tests/test_rank_candidates_cli_integration.py -q
+          python -m pytest tests/test_rank_candidates_cli_integration.py tests/test_rank_shadow_compare.py -q
+
+      - name: Run legacy vs hybrid shadow compare
+        run: |
+          python scripts/ops/rank_shadow_compare.py \
+            --config configs/config.example.yaml \
+            --db /tmp/rank_fixture.db \
+            --top 3 \
+            --top-k 3 \
+            --legacy-output /tmp/ranked_legacy.csv \
+            --hybrid-output /tmp/ranked_hybrid.csv \
+            --legacy-weight 0.40 \
+            --uncertainty-samples 20 \
+            --risk-aversion 1.10 \
+            --uncertainty-seed 123 \
+            --min-top-k-overlap-ratio 0.60 \
+            --max-mean-abs-rank-shift 2.0 \
+            --report-json /tmp/rank_shadow_compare.json \
+            --report-md /tmp/rank_shadow_compare.md \
+            --append-step-summary \
+            --json
 
       - name: Upload uncertainty rank artifact
         id: upload_rank_uncertainty_artifact
         uses: actions/upload-artifact@v4
         with:
           name: rank-uncertainty-fixture
-          path: /tmp/ranked_uncertainty.csv
+          path: |
+            /tmp/ranked_uncertainty.csv
+            /tmp/ranked_legacy.csv
+            /tmp/ranked_hybrid.csv
+            /tmp/rank_shadow_compare.json
+            /tmp/rank_shadow_compare.md
           if-no-files-found: error
 
       - name: Add uncertainty artifact link to step summary
@@ -172,5 +201,5 @@ jobs:
             echo "### Rank Uncertainty Artifact"
             echo ""
             echo "- [rank-uncertainty-fixture](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.upload_rank_uncertainty_artifact.outputs.artifact-id }})"
-            echo "- Includes: \`ranked_uncertainty.csv\`"
+            echo "- Includes: \`ranked_uncertainty.csv\`, \`ranked_legacy.csv\`, \`ranked_hybrid.csv\`, \`rank_shadow_compare.json\`, \`rank_shadow_compare.md\`"
           } >> "$GITHUB_STEP_SUMMARY"
