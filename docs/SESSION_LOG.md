@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-03-20 17:02 CST — a7726ef→87c2d25
+**Done:** sim_model gap remediation — all 5 real gaps addressed + rigor fixes. Added T0 filtering (population.py), application switching (targets.py, 4 targets), intervention specificity (interventions.py, 8 named interventions), spatial clustering (spatial.py, 5 US regions), perturbation modeling (dynamics.py, 4 presets). Applied guild budget normalization + resource consumption to prevent biologically impossible states. Updated sim_model/README.md with current state table. 113 tests, all passing.
+**Key metrics:** 113 tests, benchmark gate ✅, calibration 9/9 ✅, 7 new files + 3 modified
+**Blocked by:** nothing
+**Next:** Run adapter against real DB records when server accessible; consider negative feedback from product accumulation; return to full pipeline work (OTU backfill status, PICRUSt2 nifH, LOSO v5)
+
+---
+
 ## 2026-03-14 10:30 CST — 5b7fa48→(next)
 **Done:** Confirmed PICRUSt2 compatibility gap: NR_ accessions NOT directly compatible with PICRUSt2 IMG IDs — must use place_seqs.py path. Updated picrust2_gap_analysis.md with confirmed workflow (place_seqs.py + 16S_ref.fasta extraction + predict_metagenomes.py). BNF genus fraction documented as simpler alternative. Both require backfill to complete.
 **Key metrics:** PICRUSt2 in picrust2 conda env v2.6.3; backfill PID 658581 running; 39/47 sites have otu_profile today
