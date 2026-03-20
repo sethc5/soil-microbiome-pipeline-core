@@ -1,0 +1,41 @@
+name: sim-model-benchmark-gate
+
+on:
+  pull_request:
+    paths:
+      - "sim_model/**"
+      - "core/analysis/**"
+      - ".github/workflows/sim-model-benchmark-gate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "sim_model/**"
+      - "core/analysis/**"
+      - ".github/workflows/sim-model-benchmark-gate.yml"
+
+jobs:
+  benchmark-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run sim_model benchmark gate
+        run: |
+          python -m sim_model.benchmark_gate \
+            --seeds 7,13,29 \
+            --worlds 180 \
+            --candidates 10 \
+            --top-k 3 \
+            --min-top1-lift 0.03 \
+            --min-topk-lift 0.02 \
+            --min-regret-reduction 0.25 \
+            --min-hit-rate-margin 0.15 \
+            --json

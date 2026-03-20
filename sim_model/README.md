@@ -159,3 +159,22 @@ This folder is useful once we can:
 - explain why a candidate passed or failed
 
 At that point, the project has a small executable theory instead of only a large aspirational architecture.
+
+## CI benchmark gate
+
+Ranking logic now has a CI gate that enforces minimum lift over random on synthetic worlds.
+
+The same check can be run locally:
+
+```bash
+python3 -m sim_model.benchmark_gate \
+  --seeds 7,13,29 \
+  --worlds 180 \
+  --candidates 10 \
+  --top-k 3 \
+  --min-top1-lift 0.03 \
+  --min-topk-lift 0.02 \
+  --min-regret-reduction 0.25 \
+  --min-hit-rate-margin 0.15 \
+  --json
+```
