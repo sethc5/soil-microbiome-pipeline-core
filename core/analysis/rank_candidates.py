@@ -84,7 +84,8 @@ def _extract_top_intervention_candidate(raw: Any) -> dict[str, Any] | None:
     try:
         parsed = json.loads(raw)
     except Exception:
-        return None
+        # v3 schema may store a plain-text best intervention label.
+        return {"intervention_detail": raw.strip()}
 
     if isinstance(parsed, list) and parsed:
         first = parsed[0]
@@ -93,6 +94,118 @@ def _extract_top_intervention_candidate(raw: Any) -> dict[str, Any] | None:
     if isinstance(parsed, dict):
         return parsed
     return None
+
+
+def _table_columns(conn: Any, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    if not rows:
+        return set()
+    out: set[str] = set()
+    for row in rows:
+        if isinstance(row, dict):
+            name = row.get("name")
+        else:
+            try:
+                name = row["name"]
+            except Exception:
+                name = row[1] if len(row) > 1 else None
+        if isinstance(name, str):
+            out.add(name)
+    return out
+
+
+def _coalesced_column_expr(
+    alias: str,
+    columns: set[str],
+    preferred: list[str],
+    fallback_sql: str = "NULL",
+) -> tuple[str, str | None]:
+    for col in preferred:
+        if col in columns:
+            return f"{alias}.{col}", col
+    return fallback_sql, None
+
+
+def _build_rank_query(conn: Any) -> str:
+    run_cols = _table_columns(conn, "runs")
+    community_cols = _table_columns(conn, "communities")
+    sample_cols = _table_columns(conn, "samples")
+
+    if not run_cols or not community_cols or not sample_cols:
+        raise RuntimeError("Database schema is missing one or more required tables: runs, communities, samples.")
+    if "community_id" not in run_cols:
+        raise RuntimeError("runs.community_id is required for ranking query.")
+    if "sample_id" not in community_cols:
+        raise RuntimeError("communities.sample_id is required for ranking query.")
+    if "sample_id" not in sample_cols:
+        raise RuntimeError("samples.sample_id is required for ranking query.")
+
+    t1_flux_expr, t1_flux_col = _coalesced_column_expr("r", run_cols, ["t1_target_flux", "t1_flux"])
+    if t1_flux_col is None:
+        raise RuntimeError("runs table must contain either t1_target_flux (legacy) or t1_flux (v3).")
+
+    t1_conf_expr, _ = _coalesced_column_expr("r", run_cols, ["t1_model_confidence", "t1_confidence"], "'medium'")
+    t2_stability_expr, _ = _coalesced_column_expr("r", run_cols, ["t2_stability_score", "t2_stability"], "0.5")
+    t2_interventions_expr, _ = _coalesced_column_expr("r", run_cols, ["t2_interventions", "t2_best_intervention"])
+
+    run_date_expr = "r.run_date" if "run_date" in run_cols else "NULL"
+    t0_pass_expr = "r.t0_pass" if "t0_pass" in run_cols else "NULL"
+    t0_depth_ok_expr = "r.t0_depth_ok" if "t0_depth_ok" in run_cols else "NULL"
+    t025_model_expr = "r.t025_model" if "t025_model" in run_cols else "NULL"
+    t025_n_pathways_expr = "r.t025_n_pathways" if "t025_n_pathways" in run_cols else "NULL"
+    t025_nsti_expr = "r.t025_nsti_mean" if "t025_nsti_mean" in run_cols else "NULL"
+    t1_exchanges_expr = "r.t1_metabolic_exchanges" if "t1_metabolic_exchanges" in run_cols else "NULL"
+    t2_resistance_expr = "r.t2_resistance" if "t2_resistance" in run_cols else "NULL"
+    t2_resilience_expr = "r.t2_resilience" if "t2_resilience" in run_cols else "NULL"
+    t2_func_red_expr = "r.t2_functional_redundancy" if "t2_functional_redundancy" in run_cols else "NULL"
+
+    site_id_expr = "s.site_id" if "site_id" in sample_cols else "NULL"
+    latitude_expr = "s.latitude" if "latitude" in sample_cols else "NULL"
+    longitude_expr = "s.longitude" if "longitude" in sample_cols else "NULL"
+    soil_ph_expr = "s.soil_ph" if "soil_ph" in sample_cols else "NULL"
+    temperature_expr = "s.temperature_c" if "temperature_c" in sample_cols else "NULL"
+    om_expr = "s.organic_matter_pct" if "organic_matter_pct" in sample_cols else "NULL"
+    management_expr = "s.management" if "management" in sample_cols else "NULL"
+
+    where_clause = f"{t1_flux_expr} IS NOT NULL"
+    return f"""
+        SELECT
+            r.run_id AS run_id,
+            r.community_id AS community_id,
+            {run_date_expr} AS run_date,
+            {t0_pass_expr} AS t0_pass,
+            {t0_depth_ok_expr} AS t0_depth_ok,
+            {t025_model_expr} AS t025_model,
+            {t025_n_pathways_expr} AS t025_n_pathways,
+            {t025_nsti_expr} AS t025_nsti_mean,
+            {t1_flux_expr} AS t1_target_flux,
+            {t1_conf_expr} AS t1_model_confidence,
+            {t1_exchanges_expr} AS t1_metabolic_exchanges,
+            {t2_stability_expr} AS t2_stability_score,
+            {t2_resistance_expr} AS t2_resistance,
+            {t2_resilience_expr} AS t2_resilience,
+            {t2_func_red_expr} AS t2_functional_redundancy,
+            {t2_interventions_expr} AS t2_interventions,
+            c.sample_id AS sample_id,
+            {site_id_expr} AS site_id,
+            {latitude_expr} AS latitude,
+            {longitude_expr} AS longitude,
+            {soil_ph_expr} AS soil_ph,
+            {temperature_expr} AS temperature_c,
+            {om_expr} AS organic_matter_pct,
+            {management_expr} AS management
+        FROM runs r
+        JOIN communities c ON r.community_id = c.community_id
+        JOIN samples s ON c.sample_id = s.sample_id
+        WHERE {where_clause}
+        ORDER BY r.community_id
+    """
+
+
+def _fetch_rank_rows(database: SoilDB) -> list[dict[str, Any]]:
+    query = _build_rank_query(database.conn)
+    rows = database.conn.execute(query).fetchall()
+    return [dict(row) for row in rows]
 
 
 def _extract_management_metadata(raw: Any) -> dict[str, Any]:
@@ -420,41 +533,15 @@ def rank(
 
     # Retrieve all completed T1/T2 runs
     with SoilDB(str(db)) as database:
-        rows = database.conn.execute(
-            """
-            SELECT r.run_id, r.community_id, r.run_date,
-                   r.t0_pass, r.t0_depth_ok,
-                   r.t025_model, r.t025_n_pathways, r.t025_nsti_mean,
-                   r.t1_target_flux, r.t1_model_confidence, r.t1_metabolic_exchanges,
-                   r.t2_stability_score, r.t2_resistance, r.t2_resilience,
-                   r.t2_functional_redundancy, r.t2_interventions,
-                   c.sample_id, s.site_id, s.latitude, s.longitude,
-                   s.soil_ph, s.temperature_c, s.organic_matter_pct, s.management
-            FROM runs r
-            JOIN communities c ON r.community_id = c.community_id
-            JOIN samples s ON c.sample_id = s.sample_id
-            WHERE r.t1_target_flux IS NOT NULL
-            ORDER BY r.community_id
-            """
-        ).fetchall()
+        rows = _fetch_rank_rows(database)
 
     if not rows:
         logger.warning("No T1 results found in %s — nothing to rank.", db)
         raise typer.Exit(1)
 
-    col_names = [
-        "run_id", "community_id", "run_date", "t0_pass", "t0_depth_ok",
-        "t025_model", "t025_n_pathways", "t025_nsti_mean",
-        "t1_target_flux", "t1_model_confidence", "t1_metabolic_exchanges",
-        "t2_stability_score", "t2_resistance", "t2_resilience",
-        "t2_functional_redundancy", "t2_interventions",
-        "sample_id", "site_id", "latitude", "longitude", "soil_ph", "temperature_c",
-        "organic_matter_pct", "management",
-    ]
-
     records = []
     for row in rows:
-        d = dict(zip(col_names, row))
+        d = dict(row)
         score_data = _score_row(
             d,
             scoring_mode=scoring_mode,

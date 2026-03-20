@@ -5,10 +5,16 @@ on:
     - cron: "0 7 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   benchmark-stress-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HISTORY_PATH: results/sim_model_benchmark_history.jsonl
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,6 +23,53 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Discover previous successful nightly run
+        id: discover_previous_nightly
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const response = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: 'sim-model-benchmark-nightly.yml',
+              branch: 'main',
+              status: 'completed',
+              per_page: 20,
+            });
+            const currentRunId = context.runId;
+            const previous = response.data.workflow_runs.find(
+              (run) => run.id !== currentRunId && run.conclusion === 'success'
+            );
+            core.setOutput('found', previous ? 'true' : 'false');
+            core.setOutput('run_id', previous ? String(previous.id) : '');
+
+      - name: Download prior benchmark history artifact
+        if: steps.discover_previous_nightly.outputs.found == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.discover_previous_nightly.outputs.run_id }}
+          name: sim-model-benchmark-history
+          path: /tmp/sim-model-history
+
+      - name: Prepare canonical history file
+        run: |
+          mkdir -p results
+          if [ -f /tmp/sim-model-history/sim_model_benchmark_history.jsonl ]; then
+            cp /tmp/sim-model-history/sim_model_benchmark_history.jsonl "$HISTORY_PATH"
+            echo "Loaded benchmark history from previous nightly artifact."
+          elif [ -f reference/sim_model_benchmark_history.jsonl ]; then
+            cp reference/sim_model_benchmark_history.jsonl "$HISTORY_PATH"
+            echo "Loaded benchmark history from repository baseline."
+          else
+            touch "$HISTORY_PATH"
+            echo "No prior history found. Starting an empty history file."
+          fi
+          echo "History entries before run: $(wc -l < "$HISTORY_PATH")"
 
       - name: Run stress benchmark gate with trend assertion
         run: |
@@ -29,7 +82,7 @@ jobs:
             --min-topk-lift 0.02 \
             --min-regret-reduction 0.25 \
             --min-hit-rate-margin 0.15 \
-            --history-path reference/sim_model_benchmark_history.jsonl \
+            --history-path "$HISTORY_PATH" \
             --trend-window 20 \
             --min-history-entries 1 \
             --fail-on-missing-history \
@@ -37,18 +90,36 @@ jobs:
             --max-topk-lift-drop 0.05 \
             --max-regret-reduction-drop 0.12 \
             --max-hit-rate-margin-drop 0.12 \
-            --append-history-path reference/sim_model_benchmark_history.jsonl \
+            --append-history-path "$HISTORY_PATH" \
             --report-json-path results/sim_model_benchmark_latest.json \
             --report-md-path results/sim_model_benchmark_summary.md \
             --append-step-summary \
             --json
 
       - name: Upload nightly benchmark artifacts
+        id: upload_nightly_benchmark_artifact
         uses: actions/upload-artifact@v4
         with:
           name: sim-model-benchmark-nightly
           path: |
             results/sim_model_benchmark_latest.json
             results/sim_model_benchmark_summary.md
-            reference/sim_model_benchmark_history.jsonl
           if-no-files-found: error
+
+      - name: Upload canonical benchmark history artifact
+        id: upload_nightly_history_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-model-benchmark-history
+          path: ${{ env.HISTORY_PATH }}
+          if-no-files-found: error
+
+      - name: Add nightly artifact links to step summary
+        if: always()
+        run: |
+          {
+            echo "### Nightly Benchmark Artifacts"
+            echo ""
+            echo "- [sim-model-benchmark-nightly](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.upload_nightly_benchmark_artifact.outputs.artifact-id }})"
+            echo "- [sim-model-benchmark-history](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.upload_nightly_history_artifact.outputs.artifact-id }})"
+          } >> "$GITHUB_STEP_SUMMARY"

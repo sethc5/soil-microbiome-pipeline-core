@@ -5,6 +5,9 @@ on:
     paths:
       - "sim_model/**"
       - "core/analysis/**"
+      - "configs/sim_model_calibration.yaml"
+      - "scripts/ops/create_rank_fixture_db.py"
+      - "tests/test_rank_candidates_cli_integration.py"
       - ".github/workflows/sim-model-benchmark-gate.yml"
   push:
     branches:
@@ -12,6 +15,9 @@ on:
     paths:
       - "sim_model/**"
       - "core/analysis/**"
+      - "configs/sim_model_calibration.yaml"
+      - "scripts/ops/create_rank_fixture_db.py"
+      - "tests/test_rank_candidates_cli_integration.py"
       - ".github/workflows/sim-model-benchmark-gate.yml"
 
 jobs:
@@ -63,6 +69,7 @@ jobs:
             --append-step-summary
 
       - name: Upload benchmark artifacts
+        id: upload_benchmark_artifact
         uses: actions/upload-artifact@v4
         with:
           name: sim-model-benchmark-gate
@@ -70,6 +77,16 @@ jobs:
             results/sim_model_benchmark_latest.json
             results/sim_model_benchmark_summary.md
           if-no-files-found: error
+
+      - name: Add benchmark artifact link to step summary
+        if: always()
+        run: |
+          {
+            echo "### Benchmark Artifact"
+            echo ""
+            echo "- [sim-model-benchmark-gate](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.upload_benchmark_artifact.outputs.artifact-id }})"
+            echo "- Includes: \`results/sim_model_benchmark_latest.json\`, \`results/sim_model_benchmark_summary.md\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   rank-uncertainty-fixture:
     runs-on: ubuntu-latest
@@ -86,7 +103,7 @@ jobs:
       - name: Install rank job deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install typer pyyaml
+          python -m pip install typer pyyaml pytest
 
       - name: Build fixture DB
         run: |
@@ -136,9 +153,24 @@ jobs:
           print(f"validated {len(rows)} ranked rows")
           PY
 
+      - name: Run rank CLI integration tests
+        run: |
+          python -m pytest tests/test_rank_candidates_cli_integration.py -q
+
       - name: Upload uncertainty rank artifact
+        id: upload_rank_uncertainty_artifact
         uses: actions/upload-artifact@v4
         with:
           name: rank-uncertainty-fixture
           path: /tmp/ranked_uncertainty.csv
           if-no-files-found: error
+
+      - name: Add uncertainty artifact link to step summary
+        if: always()
+        run: |
+          {
+            echo "### Rank Uncertainty Artifact"
+            echo ""
+            echo "- [rank-uncertainty-fixture](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.upload_rank_uncertainty_artifact.outputs.artifact-id }})"
+            echo "- Includes: \`ranked_uncertainty.csv\`"
+          } >> "$GITHUB_STEP_SUMMARY"
