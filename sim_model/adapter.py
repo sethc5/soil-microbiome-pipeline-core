@@ -195,6 +195,47 @@ def _to_source_list(record: Mapping[str, Any], intervention_candidate: Mapping[s
     return sources
 
 
+# Phylum → guild mapping weights
+# Based on known functional roles of dominant soil phyla
+_PHYLUM_GUILD_WEIGHTS: Dict[str, Dict[str, float]] = {
+    # phylum: {guild: weight_in_that_guild}
+    "Proteobacteria":    {"diazotrophs": 0.50, "decomposers": 0.20, "competitors": 0.20, "stress_tolerant_taxa": 0.10},
+    "Actinobacteria":    {"diazotrophs": 0.05, "decomposers": 0.55, "competitors": 0.25, "stress_tolerant_taxa": 0.15},
+    "Acidobacteria":     {"diazotrophs": 0.02, "decomposers": 0.30, "competitors": 0.10, "stress_tolerant_taxa": 0.58},
+    "Firmicutes":        {"diazotrophs": 0.10, "decomposers": 0.15, "competitors": 0.55, "stress_tolerant_taxa": 0.20},
+    "Bacteroidetes":     {"diazotrophs": 0.05, "decomposers": 0.45, "competitors": 0.35, "stress_tolerant_taxa": 0.15},
+    "Verrucomicrobia":   {"diazotrophs": 0.02, "decomposers": 0.20, "competitors": 0.10, "stress_tolerant_taxa": 0.68},
+    "Planctomycetes":    {"diazotrophs": 0.02, "decomposers": 0.25, "competitors": 0.15, "stress_tolerant_taxa": 0.58},
+    "Chloroflexi":       {"diazotrophs": 0.02, "decomposers": 0.20, "competitors": 0.08, "stress_tolerant_taxa": 0.70},
+    "Gemmatimonadetes":  {"diazotrophs": 0.02, "decomposers": 0.15, "competitors": 0.10, "stress_tolerant_taxa": 0.73},
+    "Nitrospirae":       {"diazotrophs": 0.05, "decomposers": 0.30, "competitors": 0.15, "stress_tolerant_taxa": 0.50},
+    "Cyanobacteria":     {"diazotrophs": 0.70, "decomposers": 0.10, "competitors": 0.15, "stress_tolerant_taxa": 0.05},
+    "Fungi":             {"diazotrophs": 0.02, "decomposers": 0.50, "competitors": 0.20, "stress_tolerant_taxa": 0.28},
+}
+
+
+def _phylum_profile_to_guilds(phylum_profile: Mapping[str, float]) -> Dict[str, float]:
+    """Map a phylum abundance profile to guild abundances."""
+    guilds: Dict[str, float] = {"diazotrophs": 0.0, "decomposers": 0.0, "competitors": 0.0, "stress_tolerant_taxa": 0.0}
+
+    for phylum, abundance in phylum_profile.items():
+        weights = _PHYLUM_GUILD_WEIGHTS.get(phylum)
+        if weights is None:
+            # Unknown phylum — distribute evenly
+            for guild in guilds:
+                guilds[guild] += abundance * 0.25
+        else:
+            for guild, weight in weights.items():
+                guilds[guild] += abundance * weight
+
+    # Normalize to 0-1 range
+    total = sum(guilds.values())
+    if total > 1e-9:
+        guilds = {k: _clamp(v / total, 0.0, 1.0) for k, v in guilds.items()}
+
+    return guilds
+
+
 def _map_community(
     sources: List[Mapping[str, Any]],
     diagnostics: Dict[str, Any],
@@ -203,16 +244,39 @@ def _map_community(
     imputed: List[str] = diagnostics.setdefault("imputed_fields", [])
 
     out: Dict[str, float] = {}
+
+    # First try direct guild aliases
     for target, aliases in _COMMUNITY_ALIASES.items():
         raw, key = _extract_by_aliases(sources, aliases)
         normalized = _normalize_unit_interval(raw) if raw is not None else None
-        if normalized is None:
-            out[target] = _COMMUNITY_DEFAULTS[target]
-            imputed.append(target)
-        else:
+        if normalized is not None:
             out[target] = normalized
             if key:
                 used_fields[target] = key
+
+    # If guilds not found directly, try phylum_profile mapping
+    if len(out) < 4:
+        phylum_profile = None
+        for source in sources:
+            if isinstance(source, Mapping):
+                pp = source.get("phylum_profile")
+                if isinstance(pp, Mapping) and pp:
+                    phylum_profile = pp
+                    break
+
+        if phylum_profile is not None:
+            guilds = _phylum_profile_to_guilds(phylum_profile)
+            for target, value in guilds.items():
+                if target not in out:
+                    out[target] = value
+                    used_fields[target] = "phylum_profile"
+
+    # Fill remaining with defaults
+    for target in _COMMUNITY_DEFAULTS:
+        if target not in out:
+            out[target] = _COMMUNITY_DEFAULTS[target]
+            imputed.append(target)
+
     return Community(**out)
 
 
