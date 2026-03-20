@@ -195,7 +195,9 @@ The command exits non-zero when drift thresholds are violated.
 
 ## CI lanes
 
-- Fast lane: `.github/workflows/sim-model-benchmark-gate.yml` on PR/push with moderate settings.
+- Fast lane: `.github/workflows/sim-model-benchmark-gate.yml` on PR/push with:
+  - calibration gate (`sim_model.calibration`)
+  - benchmark gate (moderate settings)
 - Nightly stress lane: `.github/workflows/sim-model-benchmark-nightly.yml` with larger worlds/seeds and trend assertion against `reference/sim_model_benchmark_history.jsonl`.
 - Both lanes write report artifacts:
   - `results/sim_model_benchmark_latest.json`
