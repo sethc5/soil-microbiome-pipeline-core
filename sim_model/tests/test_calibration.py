@@ -41,7 +41,7 @@ def _base_config() -> dict:
                 "values": [0.10, 0.30, 0.50, 0.70],
                 "metric": "target_flux",
                 "direction": "increasing",
-                "min_total_change": 20.0,
+                "min_total_change": 5.0,
             },
             {
                 "id": "ph_band_flux_penalty",

@@ -25,9 +25,9 @@ checks:
     values: [0.10, 0.25, 0.40, 0.55, 0.70]
     metric: target_flux
     direction: increasing
-    min_total_change: 20.0
-    expected_value: 23.0
-    max_abs_drift: 12.0
+    min_total_change: 5.0
+    expected_value: 6.5
+    max_abs_drift: 4.0
 
   - id: competitor_stability_decreases
     type: monotonic_sweep

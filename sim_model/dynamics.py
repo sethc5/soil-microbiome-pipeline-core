@@ -74,6 +74,11 @@ def _evaluate_core(
 
     target_flux = max(0.0, 100.0 * env_factor * biotic_potential * flux_multiplier)
 
+    # Negative feedback: product inhibition — accumulated product slows production
+    # Real nitrogenase is inhibited by NH4+ accumulation (product inhibition)
+    product_inhibition = 1.0 / (1.0 + target_flux / 40.0)
+    target_flux *= product_inhibition
+
     env_stress = (
         (1.0 - ph_factor)
         + (abs(e.moisture - 0.62) / 0.62) * 0.45
@@ -324,6 +329,10 @@ def _evaluate_core_with_target(
     flux_multiplier = _clamp(1.0 + inoc_adjust + amendment_adjust + management_adjust_flux, 0.2, 1.9)
 
     target_flux = max(0.0, target["flux_scale"] * env_factor * biotic_potential * flux_multiplier)
+
+    # Negative feedback: product inhibition
+    product_inhibition = 1.0 / (1.0 + target_flux / 40.0)
+    target_flux *= product_inhibition
 
     env_stress = (
         (1.0 - ph_factor)
