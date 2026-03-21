@@ -574,7 +574,46 @@ def parse_args() -> argparse.Namespace:
                    help="Backfill otu_profile for samples that already have t0_pass=1 "
                         "but are missing otu_profile. Safe: does not reset t0_pass. "
                         "Use for the one-time 237K OTU backfill job.")
+    p.add_argument("--from-manifest", metavar="TSV",
+                   help="Skip DB fetch and FASTQ download; read sample_id, community_id, "
+                        "fastq_path from a manifest TSV produced by bulk_download.py.")
     return p.parse_args()
+
+
+def _load_manifest(tsv_path: str, db_path: str) -> list[tuple]:
+    """
+    Load samples from a bulk_download.py manifest TSV.
+    Columns: sample_id <tab> community_id <tab> fastq_path
+
+    Returns list of (sample_id, community_id, fastq_path) tuples,
+    skipping rows where the fastq_path does not exist on disk.
+    """
+    rows = []
+    missing = 0
+    with open(tsv_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3:
+                logger.warning("Manifest: malformed line (expected 3 cols): %r", line)
+                continue
+            sample_id, community_id_str, fastq_path = parts[0], parts[1], parts[2]
+            if not Path(fastq_path).exists():
+                logger.warning("Manifest: file not found, skipping %s → %s",
+                               sample_id, fastq_path)
+                missing += 1
+                continue
+            try:
+                community_id = int(community_id_str)
+            except ValueError:
+                logger.warning("Manifest: bad community_id %r for %s", community_id_str, sample_id)
+                continue
+            rows.append((sample_id, community_id, fastq_path))
+    if missing:
+        logger.warning("Manifest: skipped %d rows with missing FASTQ files", missing)
+    return rows
 
 
 def main() -> None:
@@ -597,11 +636,16 @@ def main() -> None:
     staging.mkdir(parents=True, exist_ok=True)
 
     conn = _db_connect(args.db)
-    sites = None if args.all_sites else args.sites
-    pending = _fetch_pending_samples(conn, sites, backfill_otu=args.backfill_otu)
-    if args.backfill_otu:
-        logger.info("OTU BACKFILL MODE: reprocessing %d samples missing otu_profile",
-                    len(pending))
+
+    if args.from_manifest:
+        pending = _load_manifest(args.from_manifest, args.db)
+        logger.info("MANIFEST MODE: loaded %d samples from %s", len(pending), args.from_manifest)
+    else:
+        sites = None if args.all_sites else args.sites
+        pending = _fetch_pending_samples(conn, sites, backfill_otu=args.backfill_otu)
+        if args.backfill_otu:
+            logger.info("OTU BACKFILL MODE: reprocessing %d samples missing otu_profile",
+                        len(pending))
 
     if not pending:
         logger.info("No pending NEON samples with FASTQ URLs.")
@@ -611,26 +655,76 @@ def main() -> None:
 
     n_ok = n_fail = n_skip = 0
 
-    def _worker(row):
-        sample_id, community_id, notes_raw = row
+    def _manifest_worker(row):
+        """Manifest mode: row is (sample_id, community_id, fastq_path) — no download."""
+        sample_id, community_id, fastq_path = row
+        workdir = staging / sample_id.replace("/", "_")
+        workdir.mkdir(parents=True, exist_ok=True)
+        hits_file = _subsample_and_classify(Path(fastq_path), silva_db, workdir, sample_id)
+        if not hits_file:
+            logger.warning("%s: classification failed", sample_id)
+            try:
+                shutil.rmtree(workdir)
+            except Exception:
+                pass
+            return None
+        phylum_profile, top_genera, shannon, otu_profile = _build_profiles(hits_file)
         try:
-            notes = json.loads(notes_raw) if notes_raw else {}
+            shutil.rmtree(workdir)
         except Exception:
+            pass
+        if not phylum_profile:
+            logger.warning("%s: empty taxonomy result", sample_id)
             return None
-        # notes can be list (old) or dict {"fastq_urls": [...]}
-        if isinstance(notes, list):
-            urls = notes
+        return {
+            "sample_id":      sample_id,
+            "community_id":   community_id,
+            "phylum_profile": phylum_profile,
+            "top_genera":     top_genera,
+            "shannon":        shannon,
+            "otu_profile":    otu_profile,
+        }
+
+    def _worker(row):
+        if args.from_manifest:
+            # Manifest mode: row is (sample_id, community_id, fastq_path)
+            sample_id, community_id, fastq_path = row
+            if args.dry_run:
+                logger.info("[DRY RUN] %s: would classify %s", sample_id, fastq_path)
+                return {"sample_id": sample_id, "skipped": True}
+            hits_file = _subsample_and_classify(Path(fastq_path), silva_db, staging, sample_id)
+            if not hits_file:
+                return None
+            phylum_profile, top_genera, shannon, otu_profile = _build_profiles(hits_file)
+            return {
+                "sample_id": sample_id,
+                "phylum_profile": phylum_profile,
+                "top_genera": top_genera,
+                "shannon_diversity": shannon,
+                "otu_profile": otu_profile,
+            }
         else:
-            urls = notes.get("fastq_urls", [])
-        if not urls:
-            return None
-        return _process_one_sample(
-            sample_id, community_id, urls,
-            silva_db, staging, args.dry_run, args.target_id,
-        )
+            # Original mode: row is (sample_id, community_id, notes_raw)
+            sample_id, community_id, notes_raw = row
+            try:
+                notes = json.loads(notes_raw) if notes_raw else {}
+            except Exception:
+                return None
+            if isinstance(notes, list):
+                urls = notes
+            else:
+                urls = notes.get("fastq_urls", [])
+            if not urls:
+                return None
+            return _process_one_sample(
+                sample_id, community_id, urls,
+                silva_db, staging, args.dry_run, args.target_id,
+            )
+
+    worker_fn = _manifest_worker if args.from_manifest else _worker
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(_worker, row): row[0] for row in pending}
+        futures = {pool.submit(worker_fn, row): row[0] for row in pending}
         for fut in as_completed(futures):
             sid = futures[fut]
             try:

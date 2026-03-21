@@ -1,0 +1,100 @@
+{
+  "training_n": 237567,
+  "n_features": 64,
+  "classifier": {
+    "cv_roc_auc": 0.8065046367105462,
+    "cv_roc_auc_std": 0.0008040521556410701,
+    "oob_accuracy": 0.7258247147120602,
+    "label_threshold_percentile": 67,
+    "label_source": "published_bnf_rates"
+  },
+  "regressor": {
+    "cv_r2": 0.4479554331458104,
+    "cv_r2_std": 0.014898960975948549,
+    "oob_r2": 0.4513970645669827,
+    "insample_spearman_r": 0.9273541148313994,
+    "label_source": "published_bnf_rates"
+  },
+  "top_features": [
+    [
+      "organic_matter_pct",
+      0.11507844416431368
+    ],
+    [
+      "soil_ph",
+      0.10388720529236557
+    ],
+    [
+      "Acidobacteria",
+      0.048153451208810795
+    ],
+    [
+      "precipitation_mm",
+      0.04529936788646173
+    ],
+    [
+      "temperature_c",
+      0.043205423649658604
+    ],
+    [
+      "Actinobacteria",
+      0.03788236580815178
+    ],
+    [
+      "Bacteroidetes",
+      0.030743067470348977
+    ],
+    [
+      "Thaumarchaeota",
+      0.02905572263954623
+    ],
+    [
+      "Proteobacteria",
+      0.029002849592400393
+    ],
+    [
+      "Gemmatimonadetes",
+      0.028950169976432724
+    ],
+    [
+      "Chloroflexi",
+      0.028840398666547664
+    ],
+    [
+      "Firmicutes",
+      0.028547276161268766
+    ],
+    [
+      "clay_pct",
+      0.02799438893447011
+    ],
+    [
+      "Verrucomicrobia",
+      0.02798512531336073
+    ],
+    [
+      "Planctomycetes",
+      0.027859802662897944
+    ],
+    [
+      "Nitrospirae",
+      0.02755983545363122
+    ],
+    [
+      "Cyanobacteria",
+      0.027441784911063874
+    ],
+    [
+      "Actinomycetota",
+      0.007798995329594054
+    ],
+    [
+      "Acidobacteriota",
+      0.007751392804142131
+    ],
+    [
+      "Pseudomonadota",
+      0.007533424300947021
+    ]
+  ]
+}

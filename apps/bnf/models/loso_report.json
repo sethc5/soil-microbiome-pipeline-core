@@ -1,0 +1,345 @@
+{
+  "loso_spearman_r": 0.1552,
+  "n_sites": 47,
+  "n_trees_per_fold": 200,
+  "total_runtime_seconds": 474.3,
+  "n_features": 64,
+  "scientific_note": "Leave-site-out CV: each fold trains on all-but-one NEON site, predicts the held-out site. Spearman r is computed over per-site mean predictions vs. published BNF rates (Smercina 2019, Vitousek 2013, Reed 2011). This is the label-leakage-free estimate of transferable predictive performance.",
+  "threshold_percentile": 67,
+  "per_site": [
+    {
+      "site_id": "MOAB",
+      "n_train": 237428,
+      "n_test": 139,
+      "mean_predicted_bnf_prob": 0.114644,
+      "published_bnf_rate_normalised": 0.0
+    },
+    {
+      "site_id": "ONAQ",
+      "n_train": 236962,
+      "n_test": 605,
+      "mean_predicted_bnf_prob": 0.412483,
+      "published_bnf_rate_normalised": 0.021277
+    },
+    {
+      "site_id": "DCFS",
+      "n_train": 222704,
+      "n_test": 14863,
+      "mean_predicted_bnf_prob": 0.133715,
+      "published_bnf_rate_normalised": 0.042553
+    },
+    {
+      "site_id": "JORN",
+      "n_train": 237427,
+      "n_test": 140,
+      "mean_predicted_bnf_prob": 0.133719,
+      "published_bnf_rate_normalised": 0.06383
+    },
+    {
+      "site_id": "NOGP",
+      "n_train": 222846,
+      "n_test": 14721,
+      "mean_predicted_bnf_prob": 0.486245,
+      "published_bnf_rate_normalised": 0.06383
+    },
+    {
+      "site_id": "STEI",
+      "n_train": 237391,
+      "n_test": 176,
+      "mean_predicted_bnf_prob": 0.511425,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "STER",
+      "n_train": 222632,
+      "n_test": 14935,
+      "mean_predicted_bnf_prob": 0.440959,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "TALL",
+      "n_train": 236810,
+      "n_test": 757,
+      "mean_predicted_bnf_prob": 0.529063,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "TOOL",
+      "n_train": 237223,
+      "n_test": 344,
+      "mean_predicted_bnf_prob": 0.525529,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "TREE",
+      "n_train": 237454,
+      "n_test": 113,
+      "mean_predicted_bnf_prob": 0.398945,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "UKFS",
+      "n_train": 222680,
+      "n_test": 14887,
+      "mean_predicted_bnf_prob": 0.417934,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "UNDE",
+      "n_train": 222144,
+      "n_test": 15423,
+      "mean_predicted_bnf_prob": 0.157767,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "WOOD",
+      "n_train": 222236,
+      "n_test": 15331,
+      "mean_predicted_bnf_prob": 0.099548,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "YELL",
+      "n_train": 237118,
+      "n_test": 449,
+      "mean_predicted_bnf_prob": 0.439286,
+      "published_bnf_rate_normalised": 0.085106
+    },
+    {
+      "site_id": "CPER",
+      "n_train": 222168,
+      "n_test": 15399,
+      "mean_predicted_bnf_prob": 0.55472,
+      "published_bnf_rate_normalised": 0.106383
+    },
+    {
+      "site_id": "HEAL",
+      "n_train": 237414,
+      "n_test": 153,
+      "mean_predicted_bnf_prob": 0.60817,
+      "published_bnf_rate_normalised": 0.106383
+    },
+    {
+      "site_id": "SJER",
+      "n_train": 236942,
+      "n_test": 625,
+      "mean_predicted_bnf_prob": 0.416699,
+      "published_bnf_rate_normalised": 0.106383
+    },
+    {
+      "site_id": "BLAN",
+      "n_train": 237431,
+      "n_test": 136,
+      "mean_predicted_bnf_prob": 0.449266,
+      "published_bnf_rate_normalised": 0.12766
+    },
+    {
+      "site_id": "KONA",
+      "n_train": 222663,
+      "n_test": 14904,
+      "mean_predicted_bnf_prob": 0.486945,
+      "published_bnf_rate_normalised": 0.12766
+    },
+    {
+      "site_id": "SCBI",
+      "n_train": 222126,
+      "n_test": 15441,
+      "mean_predicted_bnf_prob": 0.280372,
+      "published_bnf_rate_normalised": 0.12766
+    },
+    {
+      "site_id": "SRER",
+      "n_train": 236955,
+      "n_test": 612,
+      "mean_predicted_bnf_prob": 0.467627,
+      "published_bnf_rate_normalised": 0.12766
+    },
+    {
+      "site_id": "BART",
+      "n_train": 237200,
+      "n_test": 367,
+      "mean_predicted_bnf_prob": 0.592831,
+      "published_bnf_rate_normalised": 0.148936
+    },
+    {
+      "site_id": "MLBS",
+      "n_train": 237376,
+      "n_test": 191,
+      "mean_predicted_bnf_prob": 0.562578,
+      "published_bnf_rate_normalised": 0.148936
+    },
+    {
+      "site_id": "RMNP",
+      "n_train": 237461,
+      "n_test": 106,
+      "mean_predicted_bnf_prob": 0.48613,
+      "published_bnf_rate_normalised": 0.148936
+    },
+    {
+      "site_id": "SERC",
+      "n_train": 237433,
+      "n_test": 134,
+      "mean_predicted_bnf_prob": 0.564773,
+      "published_bnf_rate_normalised": 0.148936
+    },
+    {
+      "site_id": "HARV",
+      "n_train": 222100,
+      "n_test": 15467,
+      "mean_predicted_bnf_prob": 0.123241,
+      "published_bnf_rate_normalised": 0.170213
+    },
+    {
+      "site_id": "ORNL",
+      "n_train": 222169,
+      "n_test": 15398,
+      "mean_predicted_bnf_prob": 0.419759,
+      "published_bnf_rate_normalised": 0.170213
+    },
+    {
+      "site_id": "DEJU",
+      "n_train": 237335,
+      "n_test": 232,
+      "mean_predicted_bnf_prob": 0.498206,
+      "published_bnf_rate_normalised": 0.191489
+    },
+    {
+      "site_id": "JERC",
+      "n_train": 237248,
+      "n_test": 319,
+      "mean_predicted_bnf_prob": 0.417414,
+      "published_bnf_rate_normalised": 0.191489
+    },
+    {
+      "site_id": "NIWO",
+      "n_train": 236892,
+      "n_test": 675,
+      "mean_predicted_bnf_prob": 0.489645,
+      "published_bnf_rate_normalised": 0.191489
+    },
+    {
+      "site_id": "GRSM",
+      "n_train": 237374,
+      "n_test": 193,
+      "mean_predicted_bnf_prob": 0.683157,
+      "published_bnf_rate_normalised": 0.212766
+    },
+    {
+      "site_id": "SOAP",
+      "n_train": 237432,
+      "n_test": 135,
+      "mean_predicted_bnf_prob": 0.307674,
+      "published_bnf_rate_normalised": 0.212766
+    },
+    {
+      "site_id": "BONA",
+      "n_train": 237212,
+      "n_test": 355,
+      "mean_predicted_bnf_prob": 0.540813,
+      "published_bnf_rate_normalised": 0.234043
+    },
+    {
+      "site_id": "OAES",
+      "n_train": 222680,
+      "n_test": 14887,
+      "mean_predicted_bnf_prob": 0.519502,
+      "published_bnf_rate_normalised": 0.234043
+    },
+    {
+      "site_id": "OSBS",
+      "n_train": 236896,
+      "n_test": 671,
+      "mean_predicted_bnf_prob": 0.432424,
+      "published_bnf_rate_normalised": 0.255319
+    },
+    {
+      "site_id": "TEAK",
+      "n_train": 237480,
+      "n_test": 87,
+      "mean_predicted_bnf_prob": 0.332664,
+      "published_bnf_rate_normalised": 0.255319
+    },
+    {
+      "site_id": "KONZ",
+      "n_train": 222220,
+      "n_test": 15347,
+      "mean_predicted_bnf_prob": 0.20965,
+      "published_bnf_rate_normalised": 0.276596
+    },
+    {
+      "site_id": "LENO",
+      "n_train": 222723,
+      "n_test": 14844,
+      "mean_predicted_bnf_prob": 0.1587,
+      "published_bnf_rate_normalised": 0.276596
+    },
+    {
+      "site_id": "ABBY",
+      "n_train": 237447,
+      "n_test": 120,
+      "mean_predicted_bnf_prob": 0.432541,
+      "published_bnf_rate_normalised": 0.319149
+    },
+    {
+      "site_id": "CLBJ",
+      "n_train": 222260,
+      "n_test": 15307,
+      "mean_predicted_bnf_prob": 0.395244,
+      "published_bnf_rate_normalised": 0.319149
+    },
+    {
+      "site_id": "DELA",
+      "n_train": 237334,
+      "n_test": 233,
+      "mean_predicted_bnf_prob": 0.415122,
+      "published_bnf_rate_normalised": 0.319149
+    },
+    {
+      "site_id": "WREF",
+      "n_train": 237001,
+      "n_test": 566,
+      "mean_predicted_bnf_prob": 0.603864,
+      "published_bnf_rate_normalised": 0.382979
+    },
+    {
+      "site_id": "DSNY",
+      "n_train": 237313,
+      "n_test": 254,
+      "mean_predicted_bnf_prob": 0.531116,
+      "published_bnf_rate_normalised": 0.404255
+    },
+    {
+      "site_id": "BARR",
+      "n_train": 237466,
+      "n_test": 101,
+      "mean_predicted_bnf_prob": 0.255063,
+      "published_bnf_rate_normalised": 0.531915
+    },
+    {
+      "site_id": "LAJA",
+      "n_train": 237376,
+      "n_test": 191,
+      "mean_predicted_bnf_prob": 0.472807,
+      "published_bnf_rate_normalised": 0.617021
+    },
+    {
+      "site_id": "GUAN",
+      "n_train": 236945,
+      "n_test": 622,
+      "mean_predicted_bnf_prob": 0.350633,
+      "published_bnf_rate_normalised": 0.808511
+    },
+    {
+      "site_id": "PUUM",
+      "n_train": 236955,
+      "n_test": 612,
+      "mean_predicted_bnf_prob": 0.546185,
+      "published_bnf_rate_normalised": 1.0
+    }
+  ],
+  "spearman_r": 0.1552,
+  "run_date": "2026-03-12",
+  "model_version": "v2",
+  "label_unique_values": 21,
+  "analysis_note": "LOSO r=0.155. Largest errors: HEAL/GRSM over-predicted (temperate forests with high org matter but moderate BNF); GUAN/PUUM under-predicted (tropical high-BNF sites). Labels are biome-averaged (11 sites share rate=0.085 from Smercina 2019 biome assignment). Direct site-level measurements would improve label resolution."
+}

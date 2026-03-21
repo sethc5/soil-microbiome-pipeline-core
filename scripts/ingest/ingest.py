@@ -41,13 +41,13 @@ import typer
 import yaml
 
 # Ensure project root is importable when run as script/subprocess
-_PROJ_ROOT = Path(__file__).resolve().parent.parent
+_PROJ_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJ_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJ_ROOT))
 
-from config_schema import PipelineConfig
-from db_utils import SoilDB, _db_connect
-from pipeline_core import run_t0_batch, run_t025_batch
+from core.config_schema import PipelineConfig
+from core.db_utils import SoilDB, _db_connect
+from core.engine import run_t0_batch, run_t025_batch
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Ingest real soil data from NEON / SRA and run T0 pipeline", add_completion=False)

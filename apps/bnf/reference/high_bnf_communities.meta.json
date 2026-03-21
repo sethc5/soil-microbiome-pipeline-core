@@ -5000,5 +5000,7 @@
     "ref_151563": 1.0,
     "ref_151623": 1.0,
     "ref_151651": 1.0
-  }
+  },
+  "_source_note": "BNF scores in this file are pipeline-predicted (synthetic bootstrap + surrogate RF). For external validation, use bnf_measurements.csv which contains published site-level rates from Smercina et al. 2019, Vitousek et al. 2013, and Reed et al. 2011.",
+  "_validation_csv": "bnf_measurements.csv"
 }

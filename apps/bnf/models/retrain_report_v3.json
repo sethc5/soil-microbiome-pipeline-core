@@ -1,0 +1,103 @@
+{
+  "version": "v3",
+  "changes_from_v2": [
+    "Added env features: total_nitrogen_ppm, available_p_ppm, moisture_pct, bulk_density",
+    "Did NOT add top_genera (provenance unclear \u2014 may be FBA-derived, not real 16S)"
+  ],
+  "training_n": 237567,
+  "n_features": 68,
+  "classifier": {
+    "cv_roc_auc": 0.8087042533078916,
+    "cv_roc_auc_std": 0.0010576883819926478,
+    "oob_accuracy": 0.7278830814044038
+  },
+  "regressor": {
+    "cv_r2": 0.46185852234165486,
+    "cv_r2_std": 0.014079294509565207,
+    "oob_r2": 0.4647162231962333,
+    "insample_spearman_r": 0.9277126778987698
+  },
+  "top_features": [
+    [
+      "organic_matter_pct",
+      0.11466779305773465
+    ],
+    [
+      "soil_ph",
+      0.10473766225520109
+    ],
+    [
+      "Acidobacteria",
+      0.046872247955345066
+    ],
+    [
+      "precipitation_mm",
+      0.04373566815262074
+    ],
+    [
+      "temperature_c",
+      0.04236575400035319
+    ],
+    [
+      "Actinobacteria",
+      0.03694535904154462
+    ],
+    [
+      "Bacteroidetes",
+      0.030063121342007077
+    ],
+    [
+      "Thaumarchaeota",
+      0.0288513576620309
+    ],
+    [
+      "Proteobacteria",
+      0.028796509162364158
+    ],
+    [
+      "Firmicutes",
+      0.028622202227046496
+    ],
+    [
+      "Gemmatimonadetes",
+      0.0285421689809102
+    ],
+    [
+      "Chloroflexi",
+      0.028107955026548722
+    ],
+    [
+      "Verrucomicrobia",
+      0.027919153058504148
+    ],
+    [
+      "Planctomycetes",
+      0.02754348897269137
+    ],
+    [
+      "clay_pct",
+      0.027400173409298
+    ],
+    [
+      "Cyanobacteria",
+      0.026939582305891753
+    ],
+    [
+      "Nitrospirae",
+      0.026915775466934484
+    ],
+    [
+      "moisture_pct",
+      0.012519087469307202
+    ],
+    [
+      "Acidobacteriota",
+      0.00698531356417301
+    ],
+    [
+      "Actinomycetota",
+      0.006964586656945737
+    ]
+  ],
+  "scientific_note": "v3 expands environmental covariates. Nitrogen and phosphorus availability are known BNF modulators (P-limitation: Vitousek & Field 1999 DOI:10.1046/j.1365-2745.1999.00353.x). CV metrics are within-site (same-site leakage possible). Run loso_cv_bnf_surrogate_v3.py for honest cross-site performance."
+}

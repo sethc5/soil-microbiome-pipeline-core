@@ -142,3 +142,9 @@ class SoilDB:
     def get_sample_metadata(self, sample_id: str) -> Dict[str, Any]:
         row = self.conn.execute("SELECT * FROM samples WHERE sample_id = ?", (sample_id,)).fetchone()
         return dict(row) if row else {}
+
+def _db_connect(db_path):
+    """Legacy compatibility: return a raw sqlite3 connection."""
+    import sqlite3
+    return sqlite3.connect(db_path)
+

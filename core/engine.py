@@ -96,3 +96,22 @@ class PipelineEngine:
     def _persist_t1_result(self, result: Dict[str, Any]):
         """Update DB with T1 results."""
         self.db.update_community_t1(result["community_id"], result)
+
+
+# Legacy compatibility stubs for ingest.py
+def run_t0_batch(db_path: str, sample_ids: list, config: dict = None, **kwargs) -> dict:
+    """Legacy stub — T0 is now handled by process_neon_16s.py."""
+    import logging
+    logging.getLogger(__name__).warning(
+        "run_t0_batch is a legacy stub. Use process_neon_16s.py for T0 processing."
+    )
+    return {"processed": 0, "skipped": len(sample_ids), "reason": "legacy_stub"}
+
+
+def run_t025_batch(db_path: str, sample_ids: list, config: dict = None, **kwargs) -> dict:
+    """Legacy stub — T0.25 is now handled by the pipeline engine."""
+    import logging
+    logging.getLogger(__name__).warning(
+        "run_t025_batch is a legacy stub. Use PipelineEngine.run_t1_batch for T1+ processing."
+    )
+    return {"processed": 0, "skipped": len(sample_ids), "reason": "legacy_stub"}

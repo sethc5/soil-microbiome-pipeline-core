@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from adapters.neon_adapter import NEONAdapter, PRODUCT_MICROBIOME, PRODUCT_MARKER_GENE
+from core.adapters.neon_adapter import NEONAdapter, PRODUCT_MICROBIOME, PRODUCT_MARKER_GENE
 
 # Per-product CSV table keyword patterns
 _PRODUCT_CSVKEYS: dict[str, dict[str, str]] = {
