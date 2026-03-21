@@ -1,5 +1,5 @@
 # Pipeline Findings — Soil Microbiome BNF Screen
-_Last updated: 2026-03-21 (post bulk-NEON ingest + T0.25 rerun)_
+_Last updated: 2026-03-21 (evening — circular deadlock diagnosed, T1-SYNTH bootstrap added)_
 
 ---
 
@@ -71,28 +71,80 @@ Phyla depleted in high-scoring communities:
 
 ---
 
+## Geographic Distribution of T0.25 Signal
+
+### NEON Site Scores — Full Network
+
+| Site | Location | n | avg T0.25 | max T0.25 | CONUS? |
+|------|----------|---|----------|----------|--------|
+| PUUM | Hawaii (19.6°N) | 440 | **0.800** | 1.000 | ✗ |
+| GUAN | Puerto Rico (18.0°N) | 367 | **0.676** | 0.926 | ✗ |
+| LAJA | Puerto Rico (18.0°N) | 93 | 0.505 | 0.617 | ✗ |
+| BARR | Alaska (71.3°N) | 27 | 0.500 | 0.500 | ✗ |
+| HEAL | Alaska (63.9°N) | 38 | 0.490 | 0.500 | ✗ |
+| DEJU | Alaska (63.9°N) | 57 | 0.424 | 0.500 | ✗ |
+| **NOGP** | **ND (46.8°N)** | 53 | **0.414** | 0.500 | ✓ |
+| **DSNY** | **FL (28.1°N)** | 105 | **0.408** | 0.500 | ✓ |
+| **ABBY** | **WA (45.8°N)** | 57 | **0.391** | 0.500 | ✓ |
+| **LENO** | **MS (31.9°N)** | 117 | **0.385** | 0.500 | ✓ |
+| **OAES** | **OK (35.4°N)** | 123 | **0.378** | 0.500 | ✓ |
+| WREF | WA (45.8°N) | 311 | 0.372 | 0.500 | ✓ |
+| *(+32 more CONUS sites)* | | | 0.14–0.37 | 0.5 | ✓ |
+
+### Why PUUM and Puerto Rico Score So High
+
+**Biologically valid signal**: tropical volcanic soils have genuinely elevated BNF rates. PUUM (Pu'u Maka'ala, Hawaii Island): 2,000+ mm/yr precipitation, young basaltic soil, literature BNF rates 5–50 kg N/ha/yr. GUAN (El Yunque, Puerto Rico): tropical rainforest, warm/wet, high diazotroph diversity.
+
+**Extrapolation concern**: the BNF surrogate model (v3) was trained on continental literature data — predominantly temperate North America and Europe. PUUM/GUAN sit at or beyond the edge of the training feature distribution (extreme precipitation_mm, temperature_c, soil chemistry). A score of 1.000 almost certainly reflects hitting the model boundary rather than a calibrated prediction.
+
+### Decision: Focus Reporting on CONUS
+
+**CONUS filter**: lat 24–50°N, lon 65–125°W (48 contiguous states)
+
+Rationale:
+1. ML surrogate is most reliable within training distribution (continental temperate soils)
+2. Hawaiian / PR / Alaskan soils are ecologically distinct — they warrant separate modelling
+3. Agricultural and restoration relevance is highest for continental USA
+4. NEON CONUS network (37 sites) provides the core long-term ecological research comparison
+
+**Top CONUS sites to prioritize** (by avg T0.25): NOGP (ND), DSNY (FL), ABBY (WA), LENO (MS), OAES (OK), WREF (WA), CLBJ (TX), KONZ (KS)
+
+The non-CONUS results (especially PUUM) are still scientifically interesting but should be reported separately with explicit extrapolation caveats.
+
+---
+
 ## Key Gaps and Next Runs
 
-### Gap 1 — T1/T2 at scale on synthetic communities (~214,000 pending) ← NEXT RUN
-Synthetic communities have T0.25 scores but T2 hasn't run on most (only 3,378/220K done).
-The pipeline order for synthetics is: **T2 dFBA first → T1 FBA on T2-pass**.
+### Gap 1 — T1/T2 at scale on synthetic communities (~220,000 pending) ← NEXT RUN
+
+**Root cause (circular deadlock):**
+- `t1_fba_batch.py` default mode requires `t2_pass=1` — T1 waits for T2
+- `t2_dfba_batch.py` requires `t1_pass=1` — T2 waits for T1
+- The 220K synthetics have neither. The 3,378 with both were bootstrapped early.
+- **Fix implemented**: `--t025-mode` flag added to `t1_fba_batch.py`
+  - New query: `WHERE t025_pass=1 AND t1_pass IS NULL AND source='synthetic'`
+  - Breaks the deadlock: T1 runs first on T0.25-scored synthetics, then T2 can run on T1-pass
+
+**Correct pipeline order for synthetics (after fix):**
+T0.25 → **T1-SYNTH** (`--t025-mode`) → T2 on T1-pass → refined T1 keystone (standard mode)
 
 ```bash
-# Run T2 on all T0.25-scored synthetics, then T1 on new T2-pass:
+# Kick off T1-SYNTH bootstrap → T2 on all resulting T1-pass:
 ssh hetzner2 'cd /opt/pipeline && source .venv/bin/activate && \
-  nohup bash scripts/ops/run_real_data_funnel.sh --workers 36 --skip-t025 \
-  > logs/real_data_funnel_scale.log 2>&1 &'
+  nohup bash scripts/ops/run_real_data_funnel.sh \
+    --workers 36 --skip-t025 --skip-t1 \
+  > logs/synth_bootstrap_$(date +%Y%m%d_%H%M%S).log 2>&1 &'
 ```
-**Expected yield**: 10–30% T2 pass rate → 20–60K new T1/T2 validated candidates.
+**Expected yield** (220K communities): ~10–30% T1-pass rate → 22–66K new T1-pass; of those ~70% T2-stable → 15–46K new fully validated candidates.
 
 ### Gap 2 — T2 on 339 existing T1-pass lacking T2 ← quick win
 Already handled by `run_real_data_funnel.sh --skip-t025 --skip-t1`.
 
 ### Gap 3 — Real NEON T1 (BLOCKED — needs architecture decision)
 16S amplicon classifies to phylum. T1 FBA requires genus-level metabolic models (21 pre-built SBML in `/data/pipeline/models/`). Options ranked by effort:
-1. **Accept T0.25-only reporting** for NEON communities — scientifically valid for screening
-2. **AGORA2/MICOM** — 16S-compatible community metabolic modeling, no genus needed
-3. **Paired metagenomics** — some NEON sites have shotgun data for true genus assignment
+1. **Accept T0.25-only reporting** for NEON communities — scientifically valid for screening; CONUS T0.25 signal is the primary deliverable
+2. **Phylum→genus proxy mapping** — extend `_GENUS_NCBI` dict to map each observed phylum to its best BNF-representative genus. Synthesize `top_genera` from `phylum_profile` before T1. Coarse but enables mechanistic validation for top CONUS sites without new data.
+3. **NEON paired metagenomics** — NEON ARCTOS has shotgun metagenomics at ~30 CONUS sites; gives genus/species resolution and direct nifH gene detection. Separate ingest pipeline needed. Highest value if advancing toward publication.
 
 ### Gap 4 — FVA bounds for T1 flux confidence
 All current T1 top candidates hit the 50.0 flux ceiling. `t1_fba_batch.py` has `--fva` flag — needs verification that it runs and populates `t1_flux_lower_bound`/`t1_flux_upper_bound`.

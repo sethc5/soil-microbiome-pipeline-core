@@ -657,13 +657,17 @@ def _fetch_communities(
     db_path: str,
     n_max: int,
     real_mode: bool = False,
+    t025_mode: bool = False,
 ) -> list[tuple]:
     """
     Load communities for T1 modelling.
 
-    real_mode=False (default): load T2-passed synthetic communities.
+    real_mode=False, t025_mode=False (default): load T2-passed synthetic communities.
     real_mode=True: load real amplicon communities (neon/mgnify) with
       t0_pass=1 and non-empty genus data, bypassing the t2_pass gate.
+    t025_mode=True: load T0.25-scored synthetic communities regardless of t2_pass.
+      Used to bootstrap T1 on the 220K synthetics stuck in the T2→T1 circular
+      dependency (T1 requires t2_pass, T2 requires t1_pass).
 
     Returns list of (community_id, top_genera_json, metadata_json).
     """
@@ -687,6 +691,30 @@ def _fetch_communities(
                  AND c.top_genera IS NOT NULL
                  AND c.top_genera NOT IN ('[]', '{}', 'null', '')
                ORDER BY s.site_id, s.sampling_date
+               LIMIT ?""",
+            (n_max,),
+        ).fetchall()
+    elif t025_mode:
+        # Bootstrap: run T1 on T0.25-scored synthetics regardless of t2_pass.
+        # Breaks the circular deadlock where T1 requires t2_pass=1 and T2 requires
+        # t1_pass=1. After this runs, T2 can proceed normally on t1_pass communities.
+        rows = conn.execute(
+            """SELECT c.community_id, c.top_genera,
+                      json_object(
+                        'soil_ph',           COALESCE(s.soil_ph, 6.5),
+                        'organic_matter_pct',COALESCE(s.organic_matter_pct, 2.0),
+                        'clay_pct',          COALESCE(s.clay_pct, 25.0),
+                        'temperature_c',     COALESCE(s.temperature_c, 12.0),
+                        'precipitation_mm',  COALESCE(s.precipitation_mm, 600.0)
+                      )
+               FROM runs r
+               JOIN communities c ON r.community_id = c.community_id
+               JOIN samples s ON r.sample_id = s.sample_id
+               WHERE r.t025_pass = 1
+                 AND r.t1_pass IS NULL
+                 AND s.source = 'synthetic'
+                 AND c.top_genera IS NOT NULL
+               ORDER BY r.t025_function_score DESC
                LIMIT ?""",
             (n_max,),
         ).fetchall()
@@ -820,6 +848,9 @@ def main(
     real_mode:     bool            = typer.Option(False, "--real-mode",
                                        help="Process t0_pass=1 neon/mgnify amplicon communities "
                                             "instead of t2_pass=1 synthetic communities"),
+    t025_mode:     bool            = typer.Option(False, "--t025-mode",
+                                       help="Bootstrap T1 on t025_pass=1 synthetic communities "
+                                            "(breaks T2→T1 circular dependency; run before T2)"),
 ):
     """Run T1 metabolic modelling: CarveMe model-build → community FBA → keystone."""
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
@@ -842,8 +873,13 @@ def main(
     # Phase A: determine unique genera and build per-genus models
     # ------------------------------------------------------------------
     logger.info("Loading communities from DB ...")
-    communities = _fetch_communities(str(db_path), n_communities, real_mode=real_mode)
-    mode_label = "real amplicon (neon/mgnify)" if real_mode else "T2-passed synthetic"
+    communities = _fetch_communities(str(db_path), n_communities, real_mode=real_mode, t025_mode=t025_mode)
+    if real_mode:
+        mode_label = "real amplicon (neon/mgnify)"
+    elif t025_mode:
+        mode_label = "T0.25-seeded synthetic (bootstrap)"
+    else:
+        mode_label = "T2-passed synthetic"
     logger.info("Found %d %s communities with t1_pass IS NULL", len(communities), mode_label)
     if not communities:
         logger.warning("No communities need T1 modelling — nothing to do")

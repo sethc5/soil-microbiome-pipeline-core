@@ -7,13 +7,15 @@
 #
 # Usage:
 #   cd /opt/pipeline && source .venv/bin/activate
-#   bash scripts/ops/run_real_data_funnel.sh [--skip-t025] [--skip-t1] [--skip-t2] [--workers N]
+#   bash scripts/ops/run_real_data_funnel.sh [--skip-t025] [--skip-t1] [--skip-t1-synth] [--skip-t2] [--workers N]
 #
 # Phases:
-#   T0.25  — score all t0_pass=1 communities missing function_score (~7,759 pending)
-#   T1     — community FBA on real neon/mgnify amplicon communities (--real-mode)
-#   T2     — dFBA dynamics on T1-pass communities
-#   ANALYSIS — ranked_candidates, spatial, enrichment, findings (parallel)
+#   T0.25      — score all t0_pass=1 communities missing function_score
+#   T1         — community FBA on real neon/mgnify amplicon communities (--real-mode)
+#   T1-SYNTH   — bootstrap T1 on 220K synthetic communities via --t025-mode
+#                (breaks T2→T1 circular dependency; must run before T2 on synthetics)
+#   T2         — dFBA dynamics on all T1-pass communities (real + synthetic)
+#   ANALYSIS   — ranked_candidates, spatial, enrichment, findings (parallel)
 # =============================================================================
 set -euo pipefail
 
@@ -22,6 +24,7 @@ LOG_DIR="/opt/pipeline/logs"
 WORKERS=36
 SKIP_T025=false
 SKIP_T1=false
+SKIP_T1_SYNTH=false
 SKIP_T2=false
 SKIP_ANALYSIS=false
 
@@ -31,10 +34,11 @@ while [[ $# -gt 0 ]]; do
     --workers)       WORKERS="$2"; shift 2 ;;
     --skip-t025)     SKIP_T025=true; shift ;;
     --skip-t1)       SKIP_T1=true; shift ;;
+    --skip-t1-synth) SKIP_T1_SYNTH=true; shift ;;
     --skip-t2)       SKIP_T2=true; shift ;;
     --skip-analysis) SKIP_ANALYSIS=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--db PATH] [--workers N] [--skip-t025] [--skip-t1] [--skip-t2] [--skip-analysis]"
+      echo "Usage: $0 [--db PATH] [--workers N] [--skip-t025] [--skip-t1] [--skip-t1-synth] [--skip-t2] [--skip-analysis]"
       exit 0 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -58,12 +62,12 @@ run_phase() {
   fi
 }
 
-log "╔══════════════════════════════════════════════╗"
-log "║  REAL DATA FUNNEL — T0.25 → T1 → T2 → OUT  ║"
+log "╔══════════════════════════════════════════════════════╗"
+log "║  REAL DATA FUNNEL — T0.25 → T1 → T1-SYNTH → T2 → OUT  ║"
 log "║  DB:      $DB"
 log "║  Workers: $WORKERS"
 log "║  Log:     $RUN_LOG"
-log "╚══════════════════════════════════════════════╝"
+log "╚══════════════════════════════════════════════════════╝"
 
 # ── DB stats at start ─────────────────────────────────────────────────────────
 log "── DB state at start ──"
@@ -120,6 +124,34 @@ if [[ "$SKIP_T1" == "false" ]]; then
       --batch-size 20
 else
   log "⏭ Skipping T1 (--skip-t1)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase T1-SYNTH — Bootstrap T1 on 220K synthetic communities
+# Uses --t025-mode: processes t025_pass=1 synthetic communities regardless of
+# t2_pass. This breaks the circular dependency where T1 requires t2_pass=1
+# and T2 requires t1_pass=1. After this phase, T2 can run on t1_pass synthetics.
+# ══════════════════════════════════════════════════════════════════════════════
+if [[ "$SKIP_T1_SYNTH" == "false" ]]; then
+  SYNTH_PENDING=$(sqlite3 "$DB" "
+    SELECT COUNT(*) FROM runs r
+    JOIN samples s ON r.sample_id = s.sample_id
+    WHERE r.t025_pass=1 AND r.t1_pass IS NULL AND s.source='synthetic';" 2>/dev/null || echo 0)
+  if [[ "$SYNTH_PENDING" -gt 0 ]]; then
+    log "T1-SYNTH: $SYNTH_PENDING synthetic communities pending T1 bootstrap"
+    run_phase "T1 FBA bootstrap (synthetic --t025-mode)" \
+      python scripts/legacy/t1_fba_batch.py \
+        --db "$DB" \
+        --workers "$WORKERS" \
+        --t025-mode \
+        --n-communities 250000 \
+        --model-dir /data/pipeline/models \
+        --batch-size 20
+  else
+    log "⏭ No synthetic communities pending T1 bootstrap"
+  fi
+else
+  log "⏭ Skipping T1-SYNTH (--skip-t1-synth)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════

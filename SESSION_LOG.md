@@ -2,6 +2,59 @@
 
 ---
 
+## 2026-03-21 (Evening) — Circular Deadlock Diagnosed + T1-SYNTH Bootstrap
+
+### What Was Done
+
+**Discovery: T2→T1 circular deadlock in synthetic pipeline**
+- `t1_fba_batch.py` default mode queries `WHERE t2_pass=1 AND t1_pass IS NULL`
+- `t2_dfba_batch.py` queries `WHERE t1_pass=1 AND t2_pass IS NULL`
+- The 220K synthetics have neither T1 nor T2 → neither script queues them → permanent deadlock
+- The 3,378 that already have both T1+T2 were bootstrapped before this query structure was set
+- Designed intent (from T1 docstring): initial T1 → T2 stability filter → refined T1 keystone
+
+**Fix: `--t025-mode` added to `t1_fba_batch.py`**
+- New `_fetch_communities` branch: `WHERE t025_pass=1 AND t1_pass IS NULL AND source='synthetic'`
+- Ordered by `t025_function_score DESC` (highest-confidence communities first)
+- Returns directly (no SILVA artifact filter — synthetics have clean top_genera)
+- CLI flag: `--t025-mode`; mode label: "T0.25-seeded synthetic (bootstrap)"
+- After this runs, T2 sees `t1_pass=1` communities and proceeds normally
+
+**`run_real_data_funnel.sh` updated**
+- New Phase: `T1-SYNTH` (between T1-real and T2)
+- Checks pending count before running; skip flag `--skip-t1-synth`
+- Runs `t1_fba_batch.py --t025-mode --n-communities 250000`
+- New pipeline sequence: T0.25 → T1(real) → T1-SYNTH(synthetic) → T2 → analysis
+
+**Geographic analysis: CONUS focus recommended**
+- Queried site-level T0.25 score distribution across all 48 NEON sites
+- **Non-CONUS dominates the top spots**: PUUM (Hawaii, avg 0.80), GUAN (Puerto Rico, avg 0.68), LAJA (Puerto Rico), Alaska sites (BARR, HEAL, DEJU, BONA, TOOL)
+- PUUM scores 1.000 because: (1) tropical volcanic soils genuinely high BNF, (2) far outside training distribution → ML extrapolation at feature boundary
+- Top CONUS sites by avg T0.25: NOGP/ND (0.414), DSNY/FL (0.408), ABBY/WA (0.391), LENO/MS (0.385), OAES/OK (0.378)
+- Decision: focus reporting on 48 contiguous states (lat 24–50°N, lon 65–125°W)
+- Rationale: model trained on continental literature data; PUUM/PR/ALASKA scores are extrapolation artifacts, not calibrated predictions; CONUS has direct agricultural relevance
+
+### Bugs Fixed
+
+| Bug | Fix | Commit |
+|-----|-----|--------|
+| T2→T1 circular deadlock (220K synthetics stuck) | `--t025-mode` in t1_fba_batch.py | (this session) |
+
+### Git State
+- See latest commit hash after push
+
+### Next Run (unlock the synthetics)
+```bash
+ssh hetzner2 'cd /opt/pipeline && source .venv/bin/activate && \
+  nohup bash scripts/ops/run_real_data_funnel.sh \
+    --workers 36 \
+    --skip-t025 --skip-t1 \
+  > logs/synth_bootstrap_$(date +%Y%m%d_%H%M%S).log 2>&1 &'
+```
+This runs T1-SYNTH on 220K synthetics, then T2 on resulting T1-pass. Expected: several hours.
+
+---
+
 ## 2026-03-21 — Bulk NEON Ingest + T0.25 Complete
 
 ### What Was Done
