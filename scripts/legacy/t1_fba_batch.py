@@ -173,6 +173,28 @@ _REQ_DELAY = 0.35  # seconds between API calls (rate limiting)
 
 _MODEL_CACHE: dict[str, Any] = {}
 
+# ---------------------------------------------------------------------------
+# Constants for BNF community FBA
+# ---------------------------------------------------------------------------
+
+# Max physiologically credible nitrogenase reaction flux (mmol N2/gDW/h).
+# Derived: 10 mmol_glucose × 40 ATP/glucose / 16 ATP per N2 ≈ 25.
+# AGORA2 reversible rxns otherwise inflate fva_max beyond the glucose budget.
+_BNF_NITROGENASE_FVA_RXN_CAP = 25.0
+
+# N-limited mineral medium for BNF FVA — closes all N sources, opens
+# inorganic minerals + one C source so flux is carbon/energy limited.
+_BNF_MEDIUM_CONSTRAINTS: dict = {
+    "medium_type": "N-limited-minimal",
+    "inorganic_whitelist": [
+        "EX_o2_e", "EX_pi_e", "EX_so4_e", "EX_k_e", "EX_mg2_e",
+        "EX_fe2_e", "EX_ca2_e", "EX_cl_e", "EX_zn2_e", "EX_mn2_e",
+        "EX_glc__D_e",
+    ],
+    "preferred_carbon_sources": ["EX_glc__D_e"],
+    "carbon_uptake_bound": -10.0,
+}
+
 
 def _load_genus_model(sbml_path: str) -> Any:
     """Load an SBML model, caching it for the lifetime of this worker process.
@@ -386,14 +408,12 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
     # Import heavy deps inside worker (avoids pickling issues)
     try:
         import cobra
-        from compute.community_fba import (
+        from core.compute.community_fba import (
             _merge_community_models,
-            _apply_environmental_constraints,
-            _apply_bnf_minimal_medium,
-            _find_target_reactions,
-            _extract_genome_quality_stats,
+            apply_environmental_constraints,
+            apply_medium_constraints,
         )
-        from compute.keystone_analyzer import identify_keystone_taxa
+        from core.compute.keystone_analyzer import identify_keystone_taxa
     except ImportError as exc:
         return [{"community_id": t[0], "error": f"Import failed: {exc}"} for t in batch]
 
@@ -482,7 +502,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 continue
 
             community.solver = _SOLVER
-            _apply_environmental_constraints(community, metadata)
+            apply_environmental_constraints(community, metadata)
 
             # ── BNF mode detection ────────────────────────────────────────────
             # If the community contains ≥1 model patched with NITROGENASE_MO
@@ -515,7 +535,7 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 # ±1000) down to a soil-relevant C-limited, N-free medium so
                 # that FVA on NITROGENASE_MO returns ATP-bounded (not LP-
                 # saturated) flux predictions consistent with Reed 2011.
-                _apply_bnf_minimal_medium(community)
+                apply_medium_constraints(community, _BNF_MEDIUM_CONSTRAINTS)
 
                 # Open atmospheric N2 supply for all member EX_n2_e reactions.
                 # ub=0 was set by patch_diazotroph_models (uptake only); just
@@ -528,12 +548,13 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             else:
                 # No nitrogenase — use NH4 exchange as informational FVA target;
                 # biomass objective remains the pass/fail metric (prior behaviour).
-                target_rxns = _find_target_reactions(community, "nifH_pathway")
+                target_rxns = [r for r in community.reactions
+                               if "nifH_pathway" in r.id or "nifH" in r.id.lower()]
                 if not target_rxns:
                     try:
                         target_rxns = [community.reactions.get_by_id("EX_nh4_e")]
                     except KeyError:
-                        pass
+                        target_rxns = []
 
             # FBA — biomass objective in all cases (provides carbon/energy bound)
             solution = community.optimize()
@@ -576,7 +597,6 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                     # the 90%-growth FVA objective, inflating fva_max beyond what the
                     # glucose budget allows (~25 rxn/gDW/h = 50 mmol NH4-equiv/gDW/h).
                     # Derived: 10 mmol_glucose * 40 ATP/glucose / 16 ATP per N2 = 25.
-                    from compute.community_fba import _BNF_NITROGENASE_FVA_RXN_CAP
                     if bnf_mode and fva_max > _BNF_NITROGENASE_FVA_RXN_CAP:
                         fva_max = _BNF_NITROGENASE_FVA_RXN_CAP
                 except Exception:
@@ -599,17 +619,8 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                     target_rxn_ids=target_rxn_ids,
                 )
 
-            # Genome quality stats
-            quality = _extract_genome_quality_stats(member_models)
-
-            # Confidence classification
-            confidence_score = quality.get("model_confidence", 0.35)
-            if confidence_score >= 0.7:
-                confidence_label = "high"
-            elif confidence_score >= 0.4:
-                confidence_label = "medium"
-            else:
-                confidence_label = "low"
+            # Confidence classification (quality stats not available in legacy mode)
+            confidence_label = "medium"
 
             results.append({
                 "community_id": community_id,
@@ -621,8 +632,8 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
                 "t1_flux_units": flux_units,
                 "t1_feasible": feasible,
                 "t1_keystone_taxa": json.dumps(keystone_taxa),
-                "t1_genome_completeness_mean": quality.get("genome_completeness_mean", 0.0),
-                "t1_genome_contamination_mean": quality.get("genome_contamination_mean", 100.0),
+                "t1_genome_completeness_mean": 0.0,
+                "t1_genome_contamination_mean": 100.0,
                 "t1_model_confidence": confidence_label,
                 "t1_walltime_s": time.perf_counter() - t0,
                 "error": None,
