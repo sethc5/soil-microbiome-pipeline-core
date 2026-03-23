@@ -445,6 +445,8 @@ def _worker_batch(batch: list[tuple], model_dir: str) -> list[dict]:
             _SOLVER = "hybrid"
     except Exception:
         pass
+    
+    logger.info("Using solver: %s (hybrid = HiGHS for LP + OSQP for QP)", _SOLVER)
 
     # Suppress libsbml/cobra parse noise (EX_* exchange reaction warnings)
     logging.getLogger("cobra.io.sbml").setLevel(logging.ERROR)
