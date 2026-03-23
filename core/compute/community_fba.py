@@ -135,16 +135,31 @@ def run_community_fba(
     member_models: List[Any],
     metadata: Dict[str, Any],
     intent: Any,
-    fva: bool = True
+    fva: bool = True,
+    solver: str = None
 ) -> Dict[str, Any]:
-    """Unified community FBA powered by Intent."""
+    """
+    Unified community FBA powered by Intent.
+    
+    Args:
+        member_models: List of COBRApy models for community members
+        metadata: Sample metadata (must include soil_ph)
+        intent: Application intent defining constraints and targets
+        fva: Whether to run flux variability analysis
+        solver: Solver to use ('hybrid', 'glpk', 'scipy'). 
+                If None, uses model default.
+    """
     community = _merge_community_models(member_models, max_size=20)
     if community is None:
         return {"feasible": False, "error": "merge_failed"}
 
+    # Set solver if specified
+    if solver:
+        community.solver = solver
+
     # Standard soil physics
     apply_environmental_constraints(community, metadata)
-    
+
     # Application specific constraints
     constraints = intent.get_t1_constraints(metadata)
     apply_medium_constraints(community, constraints)

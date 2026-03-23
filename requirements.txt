@@ -20,7 +20,8 @@ pandas>=2.0
 
 # Metabolic modeling
 cobra>=0.29           # COBRApy — community FBA + dFBA
-osqp>=1.1             # OSQP QP solver — enables optlang 'hybrid'/HiGHS interface
+highspy>=1.7.0        # HiGHS solver — used by optlang 'hybrid' interface for LP
+osqp>=1.1             # OSQP QP solver — hybrid uses this for QP (not LP)
 carveme>=1.5          # automated genome-scale model construction
 
 # Geospatial

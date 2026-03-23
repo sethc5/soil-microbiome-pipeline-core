@@ -21,7 +21,16 @@ class PipelineEngine:
         self.intent = intent
         self.db = db
         self.config = config
-        self._solver = "glpk" # Enforce GLPK for safety on AGORA2 models
+        # Detect best available solver: prefer hybrid (HiGHS for LP, OSQP for QP)
+        # with GLPK fallback. Hybrid is safe at fraction_of_optimum > 0 (e.g. 0.9).
+        # See t1_fba_batch.py for detailed solver safety notes.
+        self._solver = "glpk"
+        try:
+            import cobra.util.solver as _cs
+            if "hybrid" in _cs.solvers:
+                self._solver = "hybrid"
+        except Exception:
+            pass
 
     def run_t1_batch(
         self, 
@@ -67,30 +76,31 @@ class PipelineEngine:
 
     def _worker_t1_batch(self, community_ids: List[int], models_dir: str) -> List[Dict[str, Any]]:
         """
-        Consolidated worker logic with namespacing and GLPK enforcement.
+        Consolidated worker logic with namespacing and solver detection.
         """
         from .compute.community_fba import run_community_fba
-        
+
         results = []
         for cid in community_ids:
             try:
                 community_data = self.db.get_community(cid)
                 metadata = self.db.get_sample_metadata(community_data["sample_id"])
-                
+
                 # In a real implementation, we would load the actual member models here
                 # using a GenomeFetcher or similar.
-                member_models = [] 
-                
+                member_models = []
+
                 res = run_community_fba(
                     member_models=member_models,
                     metadata=metadata,
-                    intent=self.intent
+                    intent=self.intent,
+                    solver=self._solver
                 )
                 res["community_id"] = cid
                 results.append(res)
             except Exception as exc:
                 results.append({"community_id": cid, "t1_pass": False, "error": str(exc)})
-        
+
         return results
 
     def _persist_t1_result(self, result: Dict[str, Any]):
